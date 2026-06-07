@@ -103,10 +103,6 @@ pub struct Application {
     signals: Signals,
     jobs: Jobs,
     lsp_progress: LspProgressMap,
-    /// Last-rendered scroll position of each view, used to drop inline Jupyter
-    /// images when the view scrolls (see [`Application::clear_jupyter_images_on_scroll`]).
-    jupyter_view_offsets:
-        std::collections::HashMap<helix_view::ViewId, helix_view::view::ViewPosition>,
 
     theme_mode: Option<theme::Mode>,
 }
@@ -289,7 +285,6 @@ impl Application {
             signals,
             jobs,
             lsp_progress: LspProgressMap::new(),
-            jupyter_view_offsets: std::collections::HashMap::new(),
             theme_mode,
         };
 
@@ -302,7 +297,6 @@ impl Application {
             self.compositor.full_redraw = false;
         }
 
-        self.refresh_jupyter_images_on_scroll();
         self.sync_jupyter_images();
 
         let mut cx = crate::compositor::Context {
@@ -330,52 +324,6 @@ impl Application {
 
         let pos = pos.map(|pos| (pos.col as u16, pos.row as u16));
         self.terminal.draw(pos, kind).unwrap();
-    }
-
-    /// Make inline Jupyter images scroll together with the text whenever a view's
-    /// scroll position changed since the last render (explicit scrolling, or the
-    /// implicit viewport shift when an edit pushes the cursor past
-    /// `ensure_cursor_in_view`).
-    ///
-    /// Images use kitty Unicode *virtual placements* (`U=1`): the transmitted
-    /// image data and its placement persist in the terminal keyed by image id, and
-    /// the terminal composites the image wherever its placeholder cells currently
-    /// sit in the grid. So to move an image we only need to re-emit its placeholder
-    /// cells at their new rows — which a full redraw does — without re-uploading the
-    /// PNG or recreating the placement. We force that full redraw here whenever a
-    /// view scrolled and an image is on screen; the image data is transmitted once
-    /// (in `sync_jupyter_images`) and reused for the lifetime of the output.
-    fn refresh_jupyter_images_on_scroll(&mut self) {
-        let mut scrolled = false;
-        let mut offsets = std::collections::HashMap::with_capacity(self.jupyter_view_offsets.len());
-        for (view, _focused) in self.editor.tree.views() {
-            let Some(doc) = self.editor.documents.get(&view.doc) else {
-                continue;
-            };
-            let offset = doc.view_offset(view.id);
-            // A change (or a newly-seen view) means the grid moved under the images.
-            if self.jupyter_view_offsets.get(&view.id) != Some(&offset) {
-                scrolled = true;
-            }
-            offsets.insert(view.id, offset);
-        }
-        self.jupyter_view_offsets = offsets;
-
-        if !scrolled {
-            return;
-        }
-
-        // Re-emit every placeholder cell at its new row so the terminal
-        // re-composites the (already-transmitted) image where the text now is. The
-        // image data and placement are left untouched — no PNG re-upload.
-        let has_image = self.editor.documents().any(|doc| {
-            doc.jupyter_outputs
-                .iter()
-                .any(|o| o.images.iter().any(|image| image.transmitted))
-        });
-        if has_image {
-            self.compositor.need_full_redraw();
-        }
     }
 
     /// Resolve inline Jupyter image placements, transmit any new images to the

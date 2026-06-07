@@ -1939,9 +1939,10 @@ fn switch_to_lowercase(cx: &mut Context) {
 
 pub fn scroll(cx: &mut Context, offset: usize, direction: Direction, sync_cursor: bool) {
     use Direction::*;
-    // Inline Jupyter images are re-composited centrally on any view-offset change
-    // (see `Application::refresh_jupyter_images_on_scroll`), which covers this
-    // scroll too, so they move together with the text.
+    // Inline Jupyter images use kitty Unicode virtual placements, so they move
+    // with the text automatically: scrolling re-renders the text area and the TUI
+    // cell diff re-emits the placeholder cells at their new rows, re-compositing
+    // the (already-transmitted) image there. No special handling needed here.
     let config = cx.editor.config();
     let (view, doc) = current!(cx.editor);
     let mut view_offset = doc.view_offset(view.id);
