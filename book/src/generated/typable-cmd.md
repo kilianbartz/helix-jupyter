@@ -69,6 +69,10 @@
 | `:jupyter-eval`, `:jeval` | Evaluate the current selection in the Jupyter kernel. |
 | `:jupyter-variables`, `:jvars` | Show the Jupyter variable inspector for the current document. |
 | `:jupyter-kernel-select`, `:jkernel` | Pick a kernelspec to start for the current document. |
+| `:fold` | Fold the function or class at the cursor. |
+| `:unfold` | Unfold the block at the cursor. |
+| `:fold-all` | Fold all functions and classes in the document. |
+| `:unfold-all` | Unfold all folded blocks in the document. |
 | `:debug-remote`, `:dbg-tcp` | Connect to a debug adapter by TCP address and start a debugging session from a given template with given parameters. |
 | `:debug-eval` | Evaluate expression in current debug context. |
 | `:vsplit`, `:vs` | Open the file in a vertical split. |

@@ -2155,6 +2155,38 @@ fn jupyter_kernel_select(
     Ok(())
 }
 
+fn fold(cx: &mut compositor::Context, _args: Args, event: PromptEvent) -> anyhow::Result<()> {
+    if event != PromptEvent::Validate {
+        return Ok(());
+    }
+    crate::commands::fold_close_impl(cx.editor);
+    Ok(())
+}
+
+fn unfold(cx: &mut compositor::Context, _args: Args, event: PromptEvent) -> anyhow::Result<()> {
+    if event != PromptEvent::Validate {
+        return Ok(());
+    }
+    crate::commands::fold_open_impl(cx.editor);
+    Ok(())
+}
+
+fn fold_all(cx: &mut compositor::Context, _args: Args, event: PromptEvent) -> anyhow::Result<()> {
+    if event != PromptEvent::Validate {
+        return Ok(());
+    }
+    crate::commands::fold_all_impl(cx.editor);
+    Ok(())
+}
+
+fn unfold_all(cx: &mut compositor::Context, _args: Args, event: PromptEvent) -> anyhow::Result<()> {
+    if event != PromptEvent::Validate {
+        return Ok(());
+    }
+    crate::commands::unfold_all_impl(cx.editor);
+    Ok(())
+}
+
 fn debug_remote(
     cx: &mut compositor::Context,
     args: Args,
@@ -3760,6 +3792,50 @@ pub const TYPABLE_COMMAND_LIST: &[TypableCommand] = &[
         aliases: &["jkernel"],
         doc: "Pick a kernelspec to start for the current document.",
         fun: jupyter_kernel_select,
+        completer: CommandCompleter::none(),
+        signature: Signature {
+            positionals: (0, Some(0)),
+            ..Signature::DEFAULT
+        },
+    },
+    TypableCommand {
+        name: "fold",
+        aliases: &[],
+        doc: "Fold the function or class at the cursor.",
+        fun: fold,
+        completer: CommandCompleter::none(),
+        signature: Signature {
+            positionals: (0, Some(0)),
+            ..Signature::DEFAULT
+        },
+    },
+    TypableCommand {
+        name: "unfold",
+        aliases: &[],
+        doc: "Unfold the block at the cursor.",
+        fun: unfold,
+        completer: CommandCompleter::none(),
+        signature: Signature {
+            positionals: (0, Some(0)),
+            ..Signature::DEFAULT
+        },
+    },
+    TypableCommand {
+        name: "fold-all",
+        aliases: &[],
+        doc: "Fold all functions and classes in the document.",
+        fun: fold_all,
+        completer: CommandCompleter::none(),
+        signature: Signature {
+            positionals: (0, Some(0)),
+            ..Signature::DEFAULT
+        },
+    },
+    TypableCommand {
+        name: "unfold-all",
+        aliases: &[],
+        doc: "Unfold all folded blocks in the document.",
+        fun: unfold_all,
         completer: CommandCompleter::none(),
         signature: Signature {
             positionals: (0, Some(0)),

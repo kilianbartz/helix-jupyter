@@ -79,6 +79,22 @@ impl Overlay {
     }
 }
 
+/// A folded (collapsed) region of the document. The chars in `start..end` are
+/// concealed by the [`DocumentFormatter`](crate::doc_formatter::DocumentFormatter)
+/// and replaced with a single marker grapheme so that only the signature line of
+/// a block stays visible.
+#[derive(Debug, Clone, Copy)]
+pub struct FoldSpan {
+    /// First concealed char (inclusive). This is the line ending of the
+    /// signature line, so the signature itself stays visible.
+    pub start: usize,
+    /// One past the last concealed char, i.e. the start of the line the fold
+    /// resumes on.
+    pub end: usize,
+    /// Document line the fold resumes on (`char_to_line(end)`).
+    pub end_line: usize,
+}
+
 /// Line annotations allow inserting virtual text lines between normal text
 /// lines.  These lines can be filled with text in the rendering code as their
 /// contents have no effect beyond visual appearance.
@@ -278,6 +294,7 @@ impl<T: ?Sized> Drop for RawBox<T> {
 pub struct TextAnnotations<'a> {
     inline_annotations: Vec<Layer<'a, InlineAnnotation, Option<Highlight>>>,
     overlays: Vec<Layer<'a, Overlay, Option<Highlight>>>,
+    folds: Vec<Layer<'a, FoldSpan, ()>>,
     line_annotations: Vec<(Cell<usize>, RawBox<dyn LineAnnotation + 'a>)>,
 }
 
@@ -295,6 +312,7 @@ impl<'a> TextAnnotations<'a> {
     pub fn reset_pos(&self, char_idx: usize) {
         reset_pos(&self.inline_annotations, char_idx, |annot| annot.char_idx);
         reset_pos(&self.overlays, char_idx, |annot| annot.char_idx);
+        reset_pos(&self.folds, char_idx, |fold| fold.start);
         for (next_anchor, layer) in &self.line_annotations {
             next_anchor.set(unsafe { layer.get().reset_pos(char_idx) });
         }
@@ -354,6 +372,18 @@ impl<'a> TextAnnotations<'a> {
         self
     }
 
+    /// Add a layer of folded regions.
+    ///
+    /// The folds **must be sorted** by their `start` and **must not overlap**.
+    /// The chars in each fold's `start..end` range are concealed and replaced
+    /// with a single marker grapheme during rendering.
+    pub fn add_folds(&mut self, layer: &'a [FoldSpan]) -> &mut Self {
+        if !layer.is_empty() {
+            self.folds.push((layer, ()).into());
+        }
+        self
+    }
+
     /// Add new annotation lines.
     ///
     /// The line annotations **must be sorted** by their `char_idx`.
@@ -388,6 +418,22 @@ impl<'a> TextAnnotations<'a> {
             }
         }
         overlay
+    }
+
+    /// Iterates over every fold span in this annotation set. Unlike
+    /// [`Self::fold_at`] this is stateless, so it can be queried in any order
+    /// (used by vertical movement to skip concealed lines).
+    pub fn folds(&self) -> impl Iterator<Item = FoldSpan> + '_ {
+        self.folds
+            .iter()
+            .flat_map(|layer| layer.annotations.iter().copied())
+    }
+
+    /// Returns the fold that starts exactly at `char_idx`, if any.
+    pub(crate) fn fold_at(&self, char_idx: usize) -> Option<FoldSpan> {
+        self.folds
+            .iter()
+            .find_map(|layer| layer.consume(char_idx, |fold| fold.start).copied())
     }
 
     pub(crate) fn process_virtual_text_anchors(&self, grapheme: &FormattedGrapheme) {

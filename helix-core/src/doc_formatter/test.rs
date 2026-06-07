@@ -1,5 +1,5 @@
 use crate::doc_formatter::{DocumentFormatter, TextFormat};
-use crate::text_annotations::{InlineAnnotation, Overlay, TextAnnotations};
+use crate::text_annotations::{FoldSpan, InlineAnnotation, Overlay, TextAnnotations};
 
 impl TextFormat {
     fn new_test(softwrap: bool) -> Self {
@@ -160,6 +160,30 @@ fn overlay() {
         ),
         "fo   f  o foo \n.foo Xoo foo foo \n.foo foo foo  "
     );
+}
+
+fn fold_text(text: &str, folds: &[FoldSpan]) -> String {
+    DocumentFormatter::new_at_prev_checkpoint(
+        text.into(),
+        &TextFormat::new_test(false),
+        TextAnnotations::default().add_folds(folds),
+        0,
+    )
+    .collect_to_str()
+}
+
+#[test]
+fn fold() {
+    // "fn a() {" is 8 chars, so its line ending is at char 8 and "after" starts
+    // at char 27. Folding conceals everything in between, collapsing the block
+    // onto its signature line followed by a `…` marker.
+    let text = "fn a() {\n  body1\n  body2\n}\nafter\n";
+    let folds = [FoldSpan {
+        start: 8,
+        end: 27,
+        end_line: 4,
+    }];
+    assert_eq!(fold_text(text, &folds), "fn a() {…\nafter \n ");
 }
 
 fn annotate_text(text: &str, softwrap: bool, annotations: &[InlineAnnotation]) -> String {

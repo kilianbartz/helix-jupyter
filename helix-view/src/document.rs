@@ -40,6 +40,7 @@ use helix_core::{
     indent::{auto_detect_indent_style, IndentStyle},
     line_ending::auto_detect_line_ending,
     syntax::{self, config::LanguageConfiguration},
+    text_annotations::FoldSpan,
     ChangeSet, Diagnostic, LineEnding, Range, Rope, RopeBuilder, Selection, Syntax, Transaction,
 };
 
@@ -203,6 +204,9 @@ pub struct Document {
     pub jupyter_outputs: Vec<crate::jupyter::JupyterOutput>,
     /// The kernel this document evaluates against, if any.
     pub jupyter_kernel: Option<helix_jupyter::KernelId>,
+
+    /// Collapsed code blocks, sorted by `start` and non-overlapping.
+    pub(crate) folds: Vec<FoldSpan>,
 
     diff_handle: Option<DiffHandle>,
     version_control_head: Option<Arc<ArcSwap<Box<str>>>>,
@@ -749,6 +753,7 @@ impl Document {
             diagnostics: Vec::new(),
             jupyter_outputs: Vec::new(),
             jupyter_kernel: None,
+            folds: Vec::new(),
             version: 0,
             history: Cell::new(History::default()),
             savepoints: Vec::new(),
@@ -1567,6 +1572,24 @@ impl Document {
                 .map(|output| (&mut output.anchor, Assoc::After)),
         );
 
+        // Keep folded regions anchored across edits, dropping any whose body has
+        // collapsed away.
+        if !self.folds.is_empty() {
+            changes.update_positions(self.folds.iter_mut().flat_map(|fold| {
+                [
+                    (&mut fold.start, Assoc::After),
+                    (&mut fold.end, Assoc::Before),
+                ]
+            }));
+            let text = self.text.slice(..);
+            for fold in &mut self.folds {
+                fold.end_line = text.char_to_line(fold.end);
+            }
+            self.folds
+                .retain(|fold| text.char_to_line(fold.end) > text.char_to_line(fold.start) + 1);
+            self.normalize_folds();
+        }
+
         // Update the inlay hint annotations' positions, helping ensure they are displayed in the proper place
         let apply_inlay_hint_changes = |annotations: &mut Vec<InlineAnnotation>| {
             changes.update_positions(
@@ -2213,6 +2236,65 @@ impl Document {
     #[inline]
     pub fn diagnostics(&self) -> &[Diagnostic] {
         &self.diagnostics
+    }
+
+    /// The document's folded regions, sorted by `start` and non-overlapping.
+    pub fn folds(&self) -> &[FoldSpan] {
+        &self.folds
+    }
+
+    /// Keeps `folds` sorted by `start` and drops folds that overlap an earlier
+    /// one (the earlier, outer fold wins).
+    fn normalize_folds(&mut self) {
+        self.folds.sort_by_key(|fold| fold.start);
+        let mut last_end = 0;
+        self.folds.retain(|fold| {
+            if fold.start >= last_end && fold.start < fold.end {
+                last_end = fold.end;
+                true
+            } else {
+                false
+            }
+        });
+    }
+
+    /// Folds the char range `start..end`. Returns whether a fold was added (it is
+    /// ignored if it is empty or overlaps an existing fold).
+    pub fn add_fold(&mut self, start: usize, end: usize) -> bool {
+        if start >= end {
+            return false;
+        }
+        if self.folds.iter().any(|f| start < f.end && f.start < end) {
+            return false;
+        }
+        let end_line = self.text.char_to_line(end);
+        self.folds.push(FoldSpan {
+            start,
+            end,
+            end_line,
+        });
+        self.normalize_folds();
+        true
+    }
+
+    /// Returns the index of the fold whose signature line is `line`, if any.
+    pub fn fold_index_at_line(&self, line: usize) -> Option<usize> {
+        let text = self.text.slice(..);
+        self.folds
+            .iter()
+            .position(|fold| text.char_to_line(fold.start) == line)
+    }
+
+    /// Removes the fold at `index`.
+    pub fn remove_fold(&mut self, index: usize) {
+        if index < self.folds.len() {
+            self.folds.remove(index);
+        }
+    }
+
+    /// Removes all folds.
+    pub fn clear_folds(&mut self) {
+        self.folds.clear();
     }
 
     pub fn replace_diagnostics(

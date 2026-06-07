@@ -8,7 +8,7 @@ use helix_core::text_annotations::TextAnnotations;
 use helix_core::{visual_offset_from_block, Position, RopeSlice};
 use helix_stdx::rope::RopeSliceExt;
 use helix_view::editor::{WhitespaceConfig, WhitespaceRenderValue};
-use helix_view::graphics::Rect;
+use helix_view::graphics::{Rect, UnderlineStyle};
 use helix_view::theme::Style;
 use helix_view::view::ViewPosition;
 use helix_view::{Document, Theme};
@@ -91,6 +91,20 @@ pub fn render_text(
     let mut last_line_indent_level = 0;
     let mut reached_view_top = false;
 
+    // Styling for collapsed (folded) blocks: the `…` marker is themed via
+    // `ui.virtual.fold` and the signature line it sits on is underlined.
+    let fold_style = theme
+        .find_highlight("ui.virtual.fold")
+        .map(|highlight| theme.highlight(highlight))
+        .unwrap_or_default();
+    let fold_underline = {
+        let mut style = Style::default().underline_style(UnderlineStyle::Line);
+        if let Some(color) = fold_style.underline_color {
+            style = style.underline_color(color);
+        }
+        style
+    };
+
     loop {
         let Some(mut grapheme) = formatter.next() else {
             break;
@@ -148,6 +162,11 @@ pub fn render_text(
                 syntax_style: style,
                 overlay_style: Style::default(),
             }
+        } else if grapheme.is_fold() {
+            GraphemeStyle {
+                syntax_style: renderer.text_style.patch(fold_style),
+                overlay_style: Style::default(),
+            }
         } else {
             GraphemeStyle {
                 syntax_style: syntax_highlighter.style,
@@ -166,6 +185,12 @@ pub fn render_text(
             grapheme.visual_pos,
         );
         last_line_end = grapheme.visual_pos.col + grapheme_width;
+
+        // Underline the signature line of a folded block (the line the `…`
+        // marker terminates) once its text has been drawn.
+        if grapheme.is_fold() {
+            renderer.set_line_style(grapheme.visual_pos, last_line_end, fold_underline);
+        }
     }
 
     renderer.draw_indent_guides(last_line_indent_level, last_line_pos.visual_line);
@@ -382,6 +407,28 @@ impl<'a> TextRenderer<'a> {
         }
 
         width
+    }
+
+    /// Patches `style` onto every visible cell of a visual line from the start
+    /// of the text area up to (and including) `end_col`. `position` is the
+    /// visual position of a grapheme on that line (using the same coordinate
+    /// space as [`Self::draw_grapheme`]).
+    pub fn set_line_style(&mut self, mut position: Position, end_col: usize, style: Style) {
+        if position.row < self.offset.row {
+            return;
+        }
+        position.row -= self.offset.row;
+        if end_col <= self.offset.col {
+            return;
+        }
+        let width = (end_col - self.offset.col).min(self.viewport.width as usize) as u16;
+        let rect = Rect::new(
+            self.viewport.x,
+            self.viewport.y + position.row as u16,
+            width,
+            1,
+        );
+        self.surface.set_style(rect, style);
     }
 
     pub fn column_in_bounds(&self, colum: usize, width: usize) -> bool {

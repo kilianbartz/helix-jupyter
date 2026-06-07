@@ -305,6 +305,12 @@ pub fn default() -> HashMap<Mode, KeyTrie> {
             "C-u" | "backspace" => page_cursor_half_up,
             "C-d" | "space" => page_cursor_half_down,
 
+            "a" => fold_toggle,
+            "f" => fold_close,
+            "o" => fold_open,
+            "M" => fold_all,
+            "R" => unfold_all,
+
             "/" => search,
             "?" => rsearch,
             "n" => search_next,
@@ -321,6 +327,12 @@ pub fn default() -> HashMap<Mode, KeyTrie> {
             "C-f" | "pagedown" => page_down,
             "C-u" | "backspace" => page_cursor_half_up,
             "C-d" | "space" => page_cursor_half_down,
+
+            "a" => fold_toggle,
+            "f" => fold_close,
+            "o" => fold_open,
+            "M" => fold_all,
+            "R" => unfold_all,
 
             "/" => search,
             "?" => rsearch,

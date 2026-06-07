@@ -20,6 +20,7 @@
 
 A [Kakoune](https://github.com/mawww/kakoune) / [Neovim](https://github.com/neovim/neovim) inspired editor, written in Rust.
 Additionally, a REPL feature, inspired from [Zed](https://zed.dev/docs/repl) is implemented. Documentation for this can be found [here](./REPL.md).
+A tree-sitter based code folding feature is also implemented. Documentation for this can be found [here](./FOLDING.md).
 Note: The image displaying capabilities rely on [kitty's graphics protocol](https://sw.kovidgoyal.net/kitty/graphics-protocol/) and therefore only work in supported terminals.
 
 ---

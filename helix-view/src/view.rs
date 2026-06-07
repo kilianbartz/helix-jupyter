@@ -528,6 +528,10 @@ impl View {
             ));
         }
 
+        if !doc.folds().is_empty() {
+            text_annotations.add_folds(doc.folds());
+        }
+
         let jupyter = doc.config.load().jupyter.clone();
         if jupyter.enable && jupyter.inline_output && !doc.jupyter_outputs.is_empty() {
             text_annotations.add_line_annotation(crate::jupyter::JupyterLineAnnotation::new(

@@ -125,11 +125,38 @@ pub fn move_vertically(
     new_row = new_row.max(visual_pos.row as u32);
     let line_idx = slice.char_to_line(pos);
 
-    // Compute the new position.
-    let mut new_line_idx = match dir {
-        Direction::Forward => line_idx.saturating_add(count),
-        Direction::Backward => line_idx.saturating_sub(count),
-    };
+    // Fold spans as (signature_line, resume_line). Concealed lines are those
+    // strictly between the two, so vertical movement must step over them and
+    // treat each folded block as a single line.
+    let folds: Vec<(usize, usize)> = annotations
+        .folds()
+        .map(|fold| (slice.char_to_line(fold.start), fold.end_line))
+        .collect();
+    let last_line = slice.len_lines().saturating_sub(1);
+
+    // Compute the new position, stepping over folded blocks one visible line at
+    // a time so the cursor never lands on a concealed line.
+    let mut new_line_idx = line_idx;
+    for _ in 0..count {
+        let next = match dir {
+            Direction::Forward => folds
+                .iter()
+                .find(|(signature, _)| *signature == new_line_idx)
+                .map_or(new_line_idx + 1, |(_, resume)| *resume)
+                .min(last_line),
+            Direction::Backward => {
+                let prev = new_line_idx.saturating_sub(1);
+                folds
+                    .iter()
+                    .find(|(signature, resume)| *signature < prev && prev < *resume)
+                    .map_or(prev, |(signature, _)| *signature)
+            }
+        };
+        if next == new_line_idx {
+            break;
+        }
+        new_line_idx = next;
+    }
 
     let line = if new_line_idx >= slice.len_lines() - 1 {
         // there is no line terminator for the last line
@@ -969,6 +996,49 @@ mod test {
             assert_eq!(coords_at_pos(slice, range.head), coordinates.into());
             assert_eq!(range.head, range.anchor);
         }
+    }
+
+    #[test]
+    fn vertical_movement_skips_folds() {
+        use crate::text_annotations::FoldSpan;
+
+        // Lines: 0 "fn a() {", 1 "  body1", 2 "  body2", 3 "}", 4 "after".
+        let rope = Rope::from("fn a() {\n  body1\n  body2\n}\nafter\n");
+        let slice = rope.slice(..);
+        // Fold the function body: conceal from the signature line ending (8) to
+        // the start of "after" (27), resuming on line 4.
+        let folds = [FoldSpan {
+            start: 8,
+            end: 27,
+            end_line: 4,
+        }];
+        let mut annotations = TextAnnotations::default();
+        annotations.add_folds(&folds);
+
+        // Moving down from the signature line skips the concealed body and lands
+        // on line 4 rather than stepping into hidden line 1.
+        let down = move_vertically_visual(
+            slice,
+            Range::point(0),
+            Direction::Forward,
+            1,
+            Movement::Move,
+            &TextFormat::default(),
+            &mut annotations,
+        );
+        assert_eq!(coords_at_pos(slice, down.head).row, 4);
+
+        // Moving back up returns to the signature line.
+        let up = move_vertically_visual(
+            slice,
+            down,
+            Direction::Backward,
+            1,
+            Movement::Move,
+            &TextFormat::default(),
+            &mut annotations,
+        );
+        assert_eq!(coords_at_pos(slice, up.head).row, 0);
     }
 
     #[test]

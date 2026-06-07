@@ -300,6 +300,11 @@
 | `jupyter_kernel_select` | Select and start a Jupyter kernel |  |
 | `jupyter_restart` | Restart Jupyter kernel |  |
 | `jupyter_stop` | Stop Jupyter kernel |  |
+| `fold_toggle` | Toggle folding the block at the cursor | normal: `` Za ``, `` za ``, select: `` Za ``, `` za `` |
+| `fold_close` | Fold the block at the cursor | normal: `` Zf ``, `` zf ``, select: `` Zf ``, `` zf `` |
+| `fold_open` | Unfold the block at the cursor | normal: `` Zo ``, `` zo ``, select: `` Zo ``, `` zo `` |
+| `fold_all` | Fold all functions and classes | normal: `` ZM ``, `` zM ``, select: `` ZM ``, `` zM `` |
+| `unfold_all` | Unfold all folded blocks | normal: `` ZR ``, `` zR ``, select: `` ZR ``, `` zR `` |
 | `shell_pipe` | Pipe selections through shell command | normal: `` \| ``, select: `` \| `` |
 | `shell_pipe_to` | Pipe selections into shell command ignoring output | normal: `` <A-\|> ``, select: `` <A-\|> `` |
 | `shell_insert_output` | Insert shell command output before selections | normal: `` ! ``, select: `` ! `` |

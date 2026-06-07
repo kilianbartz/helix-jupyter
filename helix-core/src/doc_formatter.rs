@@ -37,6 +37,13 @@ pub enum GraphemeSource {
     VirtualText {
         highlight: Option<Highlight>,
     },
+    /// A collapsed (folded) region. A single marker grapheme stands in for
+    /// `codepoints` concealed document chars. `end_line` is the document line
+    /// the formatter resumes on after the fold.
+    Fold {
+        codepoints: u32,
+        end_line: usize,
+    },
 }
 
 impl GraphemeSource {
@@ -50,9 +57,16 @@ impl GraphemeSource {
         matches!(self, GraphemeSource::Document { codepoints: 0 })
     }
 
+    /// Returns whether this grapheme marks the start of a folded region.
+    pub fn is_fold(self) -> bool {
+        matches!(self, GraphemeSource::Fold { .. })
+    }
+
     pub fn doc_chars(self) -> usize {
         match self {
-            GraphemeSource::Document { codepoints } => codepoints as usize,
+            GraphemeSource::Document { codepoints } | GraphemeSource::Fold { codepoints, .. } => {
+                codepoints as usize
+            }
             GraphemeSource::VirtualText { .. } => 0,
         }
     }
@@ -72,6 +86,10 @@ pub struct FormattedGrapheme<'a> {
 impl FormattedGrapheme<'_> {
     pub fn is_virtual(&self) -> bool {
         self.source.is_virtual()
+    }
+
+    pub fn is_fold(&self) -> bool {
+        self.source.is_fold()
     }
 
     pub fn doc_chars(&self) -> usize {
@@ -262,6 +280,23 @@ impl<'t> DocumentFormatter<'t> {
         let (grapheme, source) =
             if let Some((grapheme, highlight)) = self.next_inline_annotation_grapheme(char_pos) {
                 (grapheme.into(), GraphemeSource::VirtualText { highlight })
+            } else if let Some(fold) = self.annotations.fold_at(char_pos) {
+                // A fold starts here: consume the concealed document chars from the
+                // grapheme iterator and emit a single marker grapheme in their place.
+                let mut consumed = 0;
+                while consumed < fold.end - char_pos {
+                    match self.graphemes.next() {
+                        Some(g) => consumed += g.len_chars(),
+                        None => break,
+                    }
+                }
+                (
+                    "…".into(),
+                    GraphemeSource::Fold {
+                        codepoints: consumed as u32,
+                        end_line: fold.end_line,
+                    },
+                )
             } else if let Some(grapheme) = self.graphemes.next() {
                 let codepoints = grapheme.len_chars() as u32;
 
@@ -471,6 +506,17 @@ impl<'t> Iterator for DocumentFormatter<'t> {
             if !grapheme.is_virtual() {
                 self.line_pos += 1;
             }
+        } else if let GraphemeSource::Fold { end_line, .. } = grapheme.source {
+            // The fold marker stands in for the signature line's newline plus the
+            // concealed body, so advance exactly one visual row and jump the
+            // document line to where the fold resumes.
+            self.visual_pos.col += grapheme.width();
+            let virtual_lines =
+                self.annotations
+                    .virtual_lines_at(self.char_pos, self.visual_pos, self.line_pos);
+            self.visual_pos.row += 1 + virtual_lines;
+            self.visual_pos.col = 0;
+            self.line_pos = end_line;
         } else {
             self.visual_pos.col += grapheme.width();
         }

@@ -607,6 +607,11 @@ impl MappableCommand {
         jupyter_kernel_select, "Select and start a Jupyter kernel",
         jupyter_restart, "Restart Jupyter kernel",
         jupyter_stop, "Stop Jupyter kernel",
+        fold_toggle, "Toggle folding the block at the cursor",
+        fold_close, "Fold the block at the cursor",
+        fold_open, "Unfold the block at the cursor",
+        fold_all, "Fold all functions and classes",
+        unfold_all, "Unfold all folded blocks",
         shell_pipe, "Pipe selections through shell command",
         shell_pipe_to, "Pipe selections into shell command ignoring output",
         shell_insert_output, "Insert shell command output before selections",
@@ -5693,6 +5698,193 @@ fn rotate_selection_contents_backward(cx: &mut Context) {
 }
 fn reverse_selection_contents(cx: &mut Context) {
     reorder_selection_contents(cx, ReorderStrategy::Reverse)
+}
+
+// code folding
+
+/// Returns the `(start, end)` char range to conceal in order to fold the
+/// smallest function or class enclosing `cursor`. `start` is the signature
+/// line's line ending and `end` is the start of the line the fold resumes on.
+/// Returns `None` if there is no enclosing multi-line block.
+fn fold_range_at(
+    text: RopeSlice,
+    cursor: Range,
+    syntax: &Syntax,
+    loader: &helix_core::syntax::Loader,
+) -> Option<(usize, usize)> {
+    let mut best: Option<(usize, usize)> = None;
+    for object in ["function", "class"] {
+        let range = textobject::textobject_treesitter(
+            text,
+            cursor,
+            textobject::TextObject::Around,
+            object,
+            syntax,
+            loader,
+            1,
+        );
+        // `textobject_treesitter` returns the input range unchanged when there
+        // is no matching node.
+        if range == cursor {
+            continue;
+        }
+        let start_line = text.char_to_line(range.from());
+        let last = range.to().saturating_sub(1).max(range.from());
+        let end_line = text.char_to_line(last);
+        if end_line <= start_line {
+            continue;
+        }
+        if best.is_none_or(|(s, e)| (e - s) > (end_line - start_line)) {
+            best = Some((start_line, end_line));
+        }
+    }
+
+    let (start_line, end_line) = best?;
+    let start = line_end_char_index(&text, start_line);
+    let end = if end_line + 1 >= text.len_lines() {
+        text.len_chars()
+    } else {
+        text.line_to_char(end_line + 1)
+    };
+    Some((start, end))
+}
+
+/// If the primary cursor sits inside a concealed fold body, returns the char
+/// position of its signature line so the cursor can be moved back into view.
+fn cursor_signature_line(doc: &helix_view::Document, view_id: helix_view::ViewId) -> Option<usize> {
+    let text = doc.text().slice(..);
+    let line = doc.selection(view_id).primary().cursor_line(text);
+    doc.folds().iter().find_map(|fold| {
+        let signature_line = text.char_to_line(fold.start);
+        if line > signature_line && line < fold.end_line {
+            Some(text.line_to_char(signature_line))
+        } else {
+            None
+        }
+    })
+}
+
+pub(crate) fn fold_close_impl(editor: &mut Editor) {
+    let loader = editor.syn_loader.load();
+    let (view, doc) = current!(editor);
+    let view_id = view.id;
+    let Some(syntax) = doc.syntax() else {
+        return;
+    };
+    let text = doc.text().slice(..);
+    let cursor = doc.selection(view_id).primary();
+    let Some((start, end)) = fold_range_at(text, cursor, syntax, &loader) else {
+        return;
+    };
+    let signature_line_start = text.line_to_char(text.char_to_line(start));
+    if doc.add_fold(start, end) {
+        // Keep the cursor on the (still visible) signature line.
+        doc.set_selection(view_id, Selection::point(signature_line_start));
+    }
+}
+
+pub(crate) fn fold_open_impl(editor: &mut Editor) {
+    let (view, doc) = current!(editor);
+    let view_id = view.id;
+    let line = doc
+        .selection(view_id)
+        .primary()
+        .cursor_line(doc.text().slice(..));
+    if let Some(index) = doc.fold_index_at_line(line) {
+        doc.remove_fold(index);
+    }
+}
+
+pub(crate) fn fold_toggle_impl(editor: &mut Editor) {
+    {
+        let (view, doc) = current!(editor);
+        let view_id = view.id;
+        let line = doc
+            .selection(view_id)
+            .primary()
+            .cursor_line(doc.text().slice(..));
+        if let Some(index) = doc.fold_index_at_line(line) {
+            doc.remove_fold(index);
+            return;
+        }
+    }
+    fold_close_impl(editor);
+}
+
+pub(crate) fn fold_all_impl(editor: &mut Editor) {
+    let loader = editor.syn_loader.load_full();
+    let (view, doc) = current!(editor);
+    let view_id = view.id;
+    let Some(syntax) = doc.syntax() else {
+        return;
+    };
+    let text = doc.text().slice(..);
+    let root = syntax.tree().root_node();
+    let Some(query) = loader.textobject_query(syntax.root_language()) else {
+        return;
+    };
+
+    let mut ranges: Vec<(usize, usize)> = Vec::new();
+    for name in ["function.around", "class.around"] {
+        if let Some(nodes) = query.capture_nodes(name, &root, text) {
+            for node in nodes {
+                let byte_range = node.byte_range();
+                let start_char = text.byte_to_char(byte_range.start);
+                let start_line = text.char_to_line(start_char);
+                let last = text
+                    .byte_to_char(byte_range.end)
+                    .saturating_sub(1)
+                    .max(start_char);
+                let end_line = text.char_to_line(last);
+                if end_line <= start_line {
+                    continue;
+                }
+                let start = line_end_char_index(&text, start_line);
+                let end = if end_line + 1 >= text.len_lines() {
+                    text.len_chars()
+                } else {
+                    text.line_to_char(end_line + 1)
+                };
+                ranges.push((start, end));
+            }
+        }
+    }
+
+    // Add outermost blocks first; `add_fold` skips folds nested inside an
+    // already-folded region.
+    ranges.sort_by(|a, b| a.0.cmp(&b.0).then(b.1.cmp(&a.1)));
+    for (start, end) in ranges {
+        doc.add_fold(start, end);
+    }
+
+    if let Some(pos) = cursor_signature_line(doc, view_id) {
+        doc.set_selection(view_id, Selection::point(pos));
+    }
+}
+
+pub(crate) fn unfold_all_impl(editor: &mut Editor) {
+    let (_view, doc) = current!(editor);
+    doc.clear_folds();
+}
+
+fn fold_close(cx: &mut Context) {
+    fold_close_impl(cx.editor);
+}
+
+fn fold_open(cx: &mut Context) {
+    fold_open_impl(cx.editor);
+}
+
+fn fold_toggle(cx: &mut Context) {
+    fold_toggle_impl(cx.editor);
+}
+
+fn fold_all(cx: &mut Context) {
+    fold_all_impl(cx.editor);
+}
+
+fn unfold_all(cx: &mut Context) {
+    unfold_all_impl(cx.editor);
 }
 
 // tree sitter node selection
