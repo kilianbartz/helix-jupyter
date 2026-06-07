@@ -2322,10 +2322,10 @@ impl Editor {
     }
 
     /// Remove all inline Jupyter images, queuing them for deletion from the
-    /// terminal on the next render. Text output is preserved. Inline images are
-    /// transient: they are cleared on scroll/Escape because terminal graphics
-    /// can't be reliably kept in sync with the scrolling text grid. Returns
-    /// `true` if any image was removed.
+    /// terminal on the next render. Text output is preserved. Used to dismiss
+    /// images on `Esc` (scrolling instead re-composites them in place; see
+    /// `Application::refresh_jupyter_images_on_scroll`). Returns `true` if any
+    /// image was removed.
     pub fn clear_jupyter_images(&mut self) -> bool {
         let mut ids = Vec::new();
         for doc in self.documents.values_mut() {

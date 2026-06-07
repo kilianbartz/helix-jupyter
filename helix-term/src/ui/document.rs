@@ -433,12 +433,16 @@ impl<'a> TextRenderer<'a> {
 
     /// Set a single cell's `symbol` and `style` directly, bypassing grapheme
     /// width handling. Used to lay out fixed-width graphics placeholder cells.
-    /// `x` is absolute; `y` is relative to the renderer's viewport.
+    /// `x` is absolute; `y` is a block-relative visual row, scrolled and clipped
+    /// by the renderer's vertical offset exactly like `draw_grapheme`.
     pub fn set_cell(&mut self, x: u16, y: u16, symbol: &str, style: Style) {
         if (y as usize) < self.offset.row {
             return;
         }
-        let y = y + self.viewport.y;
+        // Mirror `draw_grapheme`: shift up by the vertical offset so placeholder
+        // cells scroll together with the text when the view is scrolled partway
+        // into a block of virtual lines.
+        let y = y - self.offset.row as u16 + self.viewport.y;
         if self.surface.in_bounds(x, y) {
             self.surface[(x, y)].set_symbol(symbol).set_style(style);
         }
@@ -466,9 +470,11 @@ impl<'a> TextRenderer<'a> {
         if (y as usize) < self.offset.row {
             return (x, y);
         }
+        // Mirror `draw_grapheme`: shift up by the vertical offset so virtual-line
+        // text stays aligned with the document text when scrolled into a block.
         self.surface.set_string_truncated(
             x,
-            y + self.viewport.y,
+            y - self.offset.row as u16 + self.viewport.y,
             string,
             width,
             style,
