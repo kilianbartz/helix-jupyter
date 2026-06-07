@@ -49,4 +49,30 @@ pub trait Backend {
     fn supports_true_color(&self) -> bool;
     fn get_theme_mode(&self) -> Option<helix_view::theme::Mode>;
     fn set_background_color(&mut self, color: Option<Color>) -> io::Result<()>;
+
+    /// Pixel size `(width, height)` of a single terminal cell, if the platform
+    /// reports pixel dimensions. Used to size inline graphics (e.g. Jupyter plots).
+    fn cell_pixel_size(&self) -> Option<(u16, u16)> {
+        None
+    }
+    /// Whether the terminal supports the kitty graphics protocol with Unicode
+    /// placeholders, used to render inline images.
+    fn supports_graphics(&self) -> bool {
+        false
+    }
+    /// Transmit a base64-encoded PNG to the terminal as kitty image `id`, creating
+    /// a virtual placement spanning `cols`×`rows` cells (for Unicode placeholders).
+    fn transmit_image(
+        &mut self,
+        _id: u32,
+        _cols: u16,
+        _rows: u16,
+        _base64_png: &str,
+    ) -> Result<(), io::Error> {
+        Ok(())
+    }
+    /// Delete a previously transmitted kitty image and all of its placements.
+    fn delete_image(&mut self, _id: u32) -> Result<(), io::Error> {
+        Ok(())
+    }
 }

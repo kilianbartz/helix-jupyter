@@ -44,3 +44,13 @@ pub fn media_to_text(media: &jupyter_protocol::Media) -> Option<String> {
         _ => None,
     }
 }
+
+/// Extract the base64-encoded PNG from a MIME bundle, if one is present. Jupyter
+/// transmits `image/png` as base64, which is exactly the form a terminal graphics
+/// protocol (e.g. the kitty protocol) wants, so the string is returned as-is.
+pub fn media_to_png(media: &jupyter_protocol::Media) -> Option<&str> {
+    media.content.iter().find_map(|m| match m {
+        MediaType::Png(data) => Some(data.as_str()),
+        _ => None,
+    })
+}

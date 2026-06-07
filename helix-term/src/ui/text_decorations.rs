@@ -11,6 +11,7 @@ pub use jupyter::JupyterOutputs;
 
 mod diagnostics;
 mod jupyter;
+mod kitty;
 
 /// Decorations are the primary mechanism for extending the text rendering.
 ///

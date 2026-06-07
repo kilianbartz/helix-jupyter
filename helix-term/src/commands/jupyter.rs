@@ -6,8 +6,17 @@ use helix_jupyter::registry::KernelId;
 use helix_view::jupyter::JupyterOutput;
 use helix_view::DocumentId;
 
-/// Ensure the document has a running kernel, auto-starting one from
-/// `editor.jupyter.default-kernel` when configured.
+/// Resolve the kernelspec name to start when `:jupyter-start` is given no
+/// argument (and for auto-start). Prefers the kernel of an activated Python
+/// virtualenv that ships Jupyter, then falls back to the configured
+/// `editor.jupyter.default-kernel`.
+pub fn default_kernel_name(editor: &Editor) -> Option<String> {
+    helix_jupyter::active_venv_kernel()
+        .or_else(|| editor.config().jupyter.default_kernel.clone())
+}
+
+/// Ensure the document has a running kernel, auto-starting one from the active
+/// venv or `editor.jupyter.default-kernel` when configured.
 fn ensure_kernel(editor: &mut Editor, doc_id: DocumentId) -> anyhow::Result<KernelId> {
     if let Some(kernel) = editor
         .documents
@@ -26,9 +35,9 @@ fn ensure_kernel(editor: &mut Editor, doc_id: DocumentId) -> anyhow::Result<Kern
     if !config.auto_start {
         bail!("No running kernel. Start one with :jupyter-start <kernel>");
     }
-    let name = config.default_kernel.clone().ok_or_else(|| {
+    let name = default_kernel_name(editor).ok_or_else(|| {
         anyhow!(
-            "No kernel selected. Set editor.jupyter.default-kernel or run :jupyter-start <kernel>"
+            "No kernel selected. Activate a Jupyter venv, set editor.jupyter.default-kernel, or run :jupyter-start <kernel>"
         )
     })?;
     jupyter_start_impl(editor, doc_id, &name)
@@ -49,6 +58,24 @@ pub fn jupyter_start_impl(
     }
     editor.set_status(format!("Started Jupyter kernel '{kernel_name}'"));
     Ok(id)
+}
+
+/// Clear a document's Jupyter outputs, queuing all their inline images for
+/// deletion from the terminal on the next render.
+fn clear_outputs_and_queue_images(editor: &mut Editor, doc_id: DocumentId) {
+    let ids: Vec<u32> = editor
+        .document_mut(doc_id)
+        .map(|doc| {
+            let ids = doc
+                .jupyter_outputs
+                .iter()
+                .flat_map(|o| o.images.iter().map(|img| img.id))
+                .collect();
+            doc.jupyter_outputs.clear();
+            ids
+        })
+        .unwrap_or_default();
+    editor.jupyter_pending_image_deletions.extend(ids);
 }
 
 /// Evaluate the current selection (or current line) in the document's kernel.
@@ -123,16 +150,29 @@ pub fn jupyter_eval_impl(editor: &mut Editor) {
         None
     };
 
-    if let Some(doc) = editor.document_mut(doc_id) {
+    let removed_image_ids: Vec<u32> = if let Some(doc) = editor.document_mut(doc_id) {
         // Replace any previous output anchored to the same line.
         let text = doc.text().clone();
         let len = text.len_chars();
-        doc.jupyter_outputs
-            .retain(|o| text.char_to_line(o.anchor.min(len)) != last_line);
+        let on_line = |o: &JupyterOutput| text.char_to_line(o.anchor.min(len)) == last_line;
+        let removed = doc
+            .jupyter_outputs
+            .iter()
+            .filter(|o| on_line(o))
+            .flat_map(|o| o.images.iter().map(|img| img.id))
+            .collect();
+        doc.jupyter_outputs.retain(|o| !on_line(o));
         let mut output = JupyterOutput::new(anchor, execution_id, kernel);
         output.inspect_execution_id = inspect_execution_id;
         doc.jupyter_outputs.push(output);
-    }
+        removed
+    } else {
+        Vec::new()
+    };
+    // Free the replaced blocks' images from the terminal on the next render.
+    editor
+        .jupyter_pending_image_deletions
+        .extend(removed_image_ids);
     helix_event::request_redraw();
 }
 
@@ -312,8 +352,8 @@ pub fn jupyter_stop_impl(editor: &mut Editor) {
     editor.jupyter.remove_client(kernel);
     if let Some(doc) = editor.document_mut(doc_id) {
         doc.jupyter_kernel = None;
-        doc.jupyter_outputs.clear();
     }
+    clear_outputs_and_queue_images(editor, doc_id);
     editor.set_status("Stopped Jupyter kernel");
 }
 
@@ -336,8 +376,8 @@ pub fn jupyter_restart_impl(editor: &mut Editor) {
     editor.jupyter.remove_client(kernel);
     if let Some(doc) = editor.document_mut(doc_id) {
         doc.jupyter_kernel = None;
-        doc.jupyter_outputs.clear();
     }
+    clear_outputs_and_queue_images(editor, doc_id);
     let Some(name) = name else {
         editor.set_error("Could not determine kernel to restart");
         return;

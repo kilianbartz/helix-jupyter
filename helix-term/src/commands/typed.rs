@@ -2073,13 +2073,9 @@ fn jupyter_start(
     let doc_id = doc!(cx.editor).id();
     let name = match args.first() {
         Some(name) => name.to_string(),
-        None => cx
-            .editor
-            .config()
-            .jupyter
-            .default_kernel
-            .clone()
-            .ok_or_else(|| anyhow!("No kernel name given and no default-kernel configured"))?,
+        None => crate::commands::jupyter::default_kernel_name(cx.editor).ok_or_else(|| {
+            anyhow!("No kernel name given, no active Jupyter venv, and no default-kernel configured")
+        })?,
     };
     crate::commands::jupyter::jupyter_start_impl(cx.editor, doc_id, &name)?;
     Ok(())

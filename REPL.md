@@ -98,6 +98,7 @@ enable = true                 # master switch for the feature
 default-kernel = "helix-repl" # kernelspec started by :jupyter-start with no arg
 auto-start = true             # start the default kernel on first :jupyter-eval
 inline-output = true          # render output below the evaluated lines
+inline-images = true          # render plots/images inline on kitty-graphics terminals
 max-output-lines = 20         # cap inline output per evaluation (excess summarized)
 inspect-variables = true      # probe variable values for :jupyter-variables
 ```
@@ -105,15 +106,30 @@ inspect-variables = true      # probe variable values for :jupyter-variables
 | Option              | Type            | Default | Description                                                                 |
 | ------------------- | --------------- | ------- | --------------------------------------------------------------------------- |
 | `enable`            | bool            | `true`  | Turn the whole feature on/off.                                              |
-| `default-kernel`    | string \| unset | unset   | Kernelspec name used by `:jupyter-start` (no arg) and by auto-start.        |
+| `default-kernel`    | string \| unset | unset   | Kernelspec name used by `:jupyter-start` (no arg) and by auto-start, unless an active venv kernel is detected (see below). |
 | `auto-start`        | bool            | `true`  | If no kernel is running, `:jupyter-eval` auto-starts `default-kernel`.      |
 | `inline-output`     | bool            | `true`  | Render stdout/stderr/results as virtual lines under the evaluated code.     |
+| `inline-images`     | bool            | `true`  | Render image output (e.g. plots) as graphics on terminals supporting the kitty graphics protocol; text placeholder otherwise. |
 | `max-output-lines`  | integer         | `20`    | Maximum inline lines per evaluation; extra lines are summarized.            |
 | `inspect-variables` | bool            | `true`  | After each eval, probe the kernel for the values of variables you ran.      |
 
 > If `default-kernel` is unset and `auto-start` can't pick one, `:jupyter-eval`
 > will ask you to run `:jupyter-start <kernel>` (or `:jupyter-kernel-select`)
 > first.
+
+### Active virtualenv kernels
+
+When you launch Helix from an activated Python virtual environment (so
+`VIRTUAL_ENV` is set) and that venv has the `jupyter` CLI installed, Helix uses
+the venv's own kernel as the default for `:jupyter-start` (no arg) and
+auto-start. This takes precedence over `default-kernel`, so activating a venv
+"just works" without per-project configuration.
+
+The kernel is matched by interpreter: Helix picks the first installed kernelspec
+whose interpreter lives inside `$VIRTUAL_ENV`. Installing `ipykernel` in the venv
+(`pip install ipykernel`) is enough to make this kernel discoverable — its
+built-in `python3` kernelspec under `$VIRTUAL_ENV/share/jupyter` points at the
+venv's Python. Pass an explicit name to `:jupyter-start <kernel>` to override.
 
 ---
 
@@ -180,6 +196,23 @@ virtual lines beneath the last evaluated line:
 - Tracebacks have their ANSI color codes stripped for clean terminal rendering.
 - Re-evaluating the same line **replaces** its previous output block.
 - Output stays attached to the correct line as you edit the buffer above it.
+
+### Inline images (plots)
+
+When `inline-images` is enabled and your terminal supports the **kitty graphics
+protocol** (kitty, Ghostty, WezTerm, Konsole), image output — e.g. a matplotlib
+figure — is rendered as an actual picture in the virtual lines below the code,
+just like a notebook:
+
+- Images are drawn using kitty's Unicode-placeholder placement, so they scroll
+  and clip together with the surrounding text.
+- The image is scaled to fit the view width while preserving its aspect ratio.
+- Re-evaluating replaces the image, and restarting/stopping the kernel removes it.
+- On terminals without graphics support (or with `inline-images = false`), a
+  `[image WIDTH×HEIGHT]` text placeholder is shown instead.
+
+> Only `image/png` output is rendered as graphics (matplotlib's inline default).
+> Vector formats like `image/svg+xml` fall back to their text representation.
 
 ### Variable inspector
 
@@ -260,9 +293,10 @@ Add them to your theme to customize, e.g.:
   is not yet implemented.
 - **No dead-kernel detection**: if a kernel process dies unexpectedly, Helix
   won't notice automatically; use `:jupyter-restart`.
-- **Rich output**: images / HTML (`image/png`, `text/html`, …) are reduced to
-  their `text/plain` representation for the terminal; they are not rendered as
-  graphics.
+- **Rich output**: `image/png` is rendered as graphics on kitty-graphics
+  terminals (see [Inline images](#inline-images-plots)); other rich types (HTML,
+  SVG, …) are reduced to their `text/plain` representation. Inline images aren't
+  re-scaled on terminal resize until the next evaluation.
 - **Variable inspection is Python-specific.**
 
 ---
@@ -309,3 +343,9 @@ that referenced/assigned variables.
 - Editor integration lives in `helix-view` (`handlers/jupyter.rs`, `jupyter.rs`,
   the `Document`/`Editor` fields) and `helix-term` (`commands/jupyter.rs`,
   `ui/text_decorations/jupyter.rs`).
+- Inline images use the kitty graphics protocol: PNGs are transmitted by the
+  terminal backend (`helix-tui` `backend/{mod,termina}.rs`,
+  `Backend::transmit_image`/`delete_image`), orchestrated from the render loop
+  (`helix-term` `application.rs` `sync_jupyter_images`), and drawn as Unicode
+  placeholder cells (`helix-term` `ui/text_decorations/kitty.rs`). Image
+  ids/placements are tracked on `Editor` and `helix_view::jupyter::JupyterImage`.

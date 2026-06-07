@@ -84,6 +84,34 @@ pub struct TerminaBackend {
     /// The terminal emulator's background color. This is queried when claiming the terminal so
     /// that custom colors set outside of Helix with OSC11 are restored when Helix exits.
     original_background_color: Option<RgbColor>,
+    /// Whether the terminal supports the kitty graphics protocol (used for inline
+    /// Jupyter images). Detected from the environment at construction.
+    kitty_graphics: bool,
+}
+
+/// Detect terminals known to implement the kitty graphics protocol with Unicode
+/// placeholders. A full query handshake is avoided; env detection covers kitty,
+/// Ghostty, WezTerm and Konsole, which is sufficient for the inline-image feature.
+fn detect_kitty_graphics() -> bool {
+    use std::env::var_os;
+    if var_os("KITTY_WINDOW_ID").is_some()
+        || var_os("GHOSTTY_RESOURCES_DIR").is_some()
+        || var_os("WEZTERM_PANE").is_some()
+        || var_os("KONSOLE_VERSION").is_some()
+    {
+        return true;
+    }
+    if let Some(term) = var_os("TERM") {
+        if term.to_string_lossy().contains("kitty") {
+            return true;
+        }
+    }
+    matches!(
+        var_os("TERM_PROGRAM")
+            .map(|s| s.to_string_lossy().into_owned())
+            .as_deref(),
+        Some("ghostty") | Some("WezTerm")
+    )
 }
 
 impl TerminaBackend {
@@ -255,6 +283,7 @@ impl TerminaBackend {
             is_synchronized_output_set: false,
             background_color: None,
             original_background_color,
+            kitty_graphics: detect_kitty_graphics(),
         })
     }
 
@@ -603,6 +632,78 @@ impl Backend for TerminaBackend {
     fn size(&self) -> io::Result<Rect> {
         let WindowSize { rows, cols, .. } = self.terminal.get_dimensions()?;
         Ok(Rect::new(0, 0, cols, rows))
+    }
+
+    fn cell_pixel_size(&self) -> Option<(u16, u16)> {
+        let WindowSize {
+            rows,
+            cols,
+            pixel_width,
+            pixel_height,
+        } = self.terminal.get_dimensions().ok()?;
+        let (pixel_width, pixel_height) = (pixel_width?, pixel_height?);
+        if cols == 0 || rows == 0 || pixel_width == 0 || pixel_height == 0 {
+            return None;
+        }
+        Some((pixel_width / cols, pixel_height / rows))
+    }
+
+    fn supports_graphics(&self) -> bool {
+        self.kitty_graphics
+    }
+
+    fn transmit_image(
+        &mut self,
+        id: u32,
+        cols: u16,
+        rows: u16,
+        base64_png: &str,
+    ) -> io::Result<()> {
+        if !self.kitty_graphics {
+            return Ok(());
+        }
+        // The kitty payload must be unbroken base64; Jupyter may line-wrap it, so
+        // strip everything outside the base64 alphabet.
+        let payload: Vec<u8> = base64_png
+            .bytes()
+            .filter(|b| b.is_ascii_alphanumeric() || matches!(b, b'+' | b'/' | b'='))
+            .collect();
+        if payload.is_empty() {
+            return Ok(());
+        }
+        // Transmit the image data only (a=t, f=100 PNG, q=2 quiet). Using a=T
+        // here would create a *real* placement at the cursor, which does not move
+        // with the placeholder cells; the placement is created virtually below.
+        const CHUNK: usize = 4096;
+        let chunks = payload.chunks(CHUNK);
+        let last = chunks.len().saturating_sub(1);
+        for (i, chunk) in chunks.enumerate() {
+            let more = u8::from(i != last);
+            if i == 0 {
+                write!(self.terminal, "\x1b_Ga=t,q=2,i={id},f=100,m={more};")?;
+            } else {
+                write!(self.terminal, "\x1b_Gm={more};")?;
+            }
+            self.terminal.write_all(chunk)?;
+            write!(self.terminal, "\x1b\\")?;
+        }
+        // Create a *virtual* placement (a=p, U=1) spanning cols×rows cells. It is
+        // not drawn anywhere until referenced by Unicode placeholder cells, so the
+        // image scrolls and clips together with those cells.
+        write!(
+            self.terminal,
+            "\x1b_Ga=p,U=1,q=2,i={id},c={cols},r={rows}\x1b\\"
+        )?;
+        self.terminal.flush()
+    }
+
+    fn delete_image(&mut self, id: u32) -> io::Result<()> {
+        if !self.kitty_graphics {
+            return Ok(());
+        }
+        // a=d d=I: delete the image with this id and all its placements, freeing data.
+        write!(self.terminal, "\x1b_Ga=d,d=I,i={id},q=2\x1b\\")?;
+        self.terminal.flush()
     }
 
     fn flush(&mut self) -> io::Result<()> {

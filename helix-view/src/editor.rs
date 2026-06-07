@@ -450,6 +450,10 @@ pub struct JupyterConfig {
     pub auto_start: bool,
     /// Render execution output as virtual lines below the evaluated selection.
     pub inline_output: bool,
+    /// Render image output (e.g. plots) inline as graphics on terminals that
+    /// support the kitty graphics protocol. Falls back to a text placeholder
+    /// elsewhere or when disabled.
+    pub inline_images: bool,
     /// Maximum number of output lines rendered inline per execution block.
     pub max_output_lines: usize,
     /// Probe the kernel for the values of variables in the evaluated selection,
@@ -464,6 +468,7 @@ impl Default for JupyterConfig {
             default_kernel: None,
             auto_start: true,
             inline_output: true,
+            inline_images: true,
             max_output_lines: 20,
             inspect_variables: true,
         }
@@ -1248,6 +1253,11 @@ pub struct Editor {
     pub breakpoints: HashMap<PathBuf, Vec<Breakpoint>>,
 
     pub jupyter: jupyter::registry::Registry,
+    /// Monotonic source of kitty graphics image ids for inline Jupyter images.
+    jupyter_next_image_id: u32,
+    /// kitty image ids whose placements should be deleted from the terminal on
+    /// the next render (their output blocks were replaced or cleared).
+    pub jupyter_pending_image_deletions: Vec<u32>,
 
     pub syn_loader: Arc<ArcSwap<syntax::Loader>>,
     pub theme_loader: Arc<theme::Loader>,
@@ -1396,6 +1406,8 @@ impl Editor {
             diff_providers: DiffProviderRegistry::default(),
             debug_adapters: dap::registry::Registry::new(),
             jupyter: jupyter::registry::Registry::new(),
+            jupyter_next_image_id: 1,
+            jupyter_pending_image_deletions: Vec::new(),
             breakpoints: HashMap::new(),
             syn_loader,
             theme_loader,
@@ -2294,6 +2306,30 @@ impl Editor {
     #[inline]
     pub fn document_mut(&mut self, id: DocumentId) -> Option<&mut Document> {
         self.documents.get_mut(&id)
+    }
+
+    /// Allocate a fresh kitty graphics image id for an inline Jupyter image.
+    pub fn alloc_jupyter_image_id(&mut self) -> u32 {
+        let id = self.jupyter_next_image_id;
+        self.jupyter_next_image_id = self.jupyter_next_image_id.wrapping_add(1).max(1);
+        id
+    }
+
+    /// Remove all inline Jupyter images, queuing them for deletion from the
+    /// terminal on the next render. Text output is preserved. Inline images are
+    /// transient: they are cleared on scroll/Escape because terminal graphics
+    /// can't be reliably kept in sync with the scrolling text grid. Returns
+    /// `true` if any image was removed.
+    pub fn clear_jupyter_images(&mut self) -> bool {
+        let mut ids = Vec::new();
+        for doc in self.documents.values_mut() {
+            for output in &mut doc.jupyter_outputs {
+                ids.extend(output.images.drain(..).map(|img| img.id));
+            }
+        }
+        let removed = !ids.is_empty();
+        self.jupyter_pending_image_deletions.extend(ids);
+        removed
     }
 
     #[inline]

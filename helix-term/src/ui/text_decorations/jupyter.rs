@@ -1,12 +1,12 @@
 use std::collections::HashMap;
 
 use helix_core::Position;
-use helix_view::jupyter::{rendered_lines, JupyterOutput, OutputKind};
+use helix_view::jupyter::{rendered_lines, ImagePlacement, JupyterOutput, OutputKind};
 use helix_view::theme::Style;
 use helix_view::{Document, Theme};
 
 use crate::ui::document::{LinePos, TextRenderer};
-use crate::ui::text_decorations::Decoration;
+use crate::ui::text_decorations::{kitty, Decoration};
 
 struct Styles {
     output: Style,
@@ -89,6 +89,30 @@ impl Decoration for JupyterOutputs<'_> {
                 let style = self.styles.style(line.kind);
                 renderer.set_string_truncated(x, row, &line.text, width, |_| style, true, false);
                 row += 1;
+            }
+            for image in &output.images {
+                match image.placement {
+                    ImagePlacement::Kitty { rows, cols } => {
+                        let id_style = kitty::id_style(image.id);
+                        let cols = cols.min(kitty::MAX_CELLS).min(width as u16);
+                        for r in 0..rows.min(kitty::MAX_CELLS) {
+                            for c in 0..cols {
+                                if let Some(symbol) = kitty::placeholder_cell(r, c) {
+                                    renderer.set_cell(x + c, row, &symbol, id_style);
+                                }
+                            }
+                            row += 1;
+                        }
+                    }
+                    ImagePlacement::Fallback => {
+                        let label = format!("[image {}×{}]", image.width_px, image.height_px);
+                        let style = self.styles.style(OutputKind::Result);
+                        renderer
+                            .set_string_truncated(x, row, &label, width, |_| style, true, false);
+                        row += 1;
+                    }
+                    ImagePlacement::Pending => {}
+                }
             }
         }
 

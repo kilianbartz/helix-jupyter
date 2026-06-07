@@ -1939,6 +1939,11 @@ fn switch_to_lowercase(cx: &mut Context) {
 
 pub fn scroll(cx: &mut Context, offset: usize, direction: Direction, sync_cursor: bool) {
     use Direction::*;
+    // Inline Jupyter images can't be kept in sync with the scrolling text grid,
+    // so clear them as soon as the view scrolls.
+    if cx.editor.clear_jupyter_images() {
+        helix_event::request_redraw();
+    }
     let config = cx.editor.config();
     let (view, doc) = current!(cx.editor);
     let mut view_offset = doc.view_offset(view.id);
@@ -3957,6 +3962,10 @@ fn open_above(cx: &mut Context) {
 }
 
 fn normal_mode(cx: &mut Context) {
+    // Escape dismisses any inline Jupyter images.
+    if cx.editor.clear_jupyter_images() {
+        helix_event::request_redraw();
+    }
     cx.editor.enter_normal_mode();
 }
 

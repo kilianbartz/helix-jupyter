@@ -16,9 +16,13 @@
 
 </div>
 
-![Screenshot](./screenshot.png)
+![Screenshot](./demo.png)
 
 A [Kakoune](https://github.com/mawww/kakoune) / [Neovim](https://github.com/neovim/neovim) inspired editor, written in Rust.
+Additionally, a REPL feature, inspired from [Zed](https://zed.dev/docs/repl) is implemented. Documentation for this can be found [here](./REPL.md).
+Note: The image displaying capabilities rely on [kitty's graphics protocol](https://sw.kovidgoyal.net/kitty/graphics-protocol/) and therefore only work in supported terminals.
+
+---
 
 The editing model is very heavily based on Kakoune; during development I found
 myself agreeing with most of Kakoune's design decisions.

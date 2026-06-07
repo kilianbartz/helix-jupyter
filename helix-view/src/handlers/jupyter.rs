@@ -1,9 +1,9 @@
 use helix_jupyter::{
-    media_to_text, registry::KernelId, ExecutionState as KernelStatus, JupyterMessage,
-    JupyterMessageContent, Payload, Stdio,
+    media_to_png, media_to_text, registry::KernelId, ExecutionState as KernelStatus,
+    JupyterMessage, JupyterMessageContent, Payload, Stdio,
 };
 
-use crate::jupyter::{strip_ansi, ExecutionState, JupyterOutput, OutputKind};
+use crate::jupyter::{strip_ansi, ExecutionState, JupyterImage, JupyterOutput, OutputKind};
 use crate::Editor;
 
 impl Editor {
@@ -36,6 +36,18 @@ impl Editor {
         let Some(execution_id) = msg.parent_header.as_ref().map(|h| h.msg_id.clone()) else {
             return false;
         };
+
+        // Pull any PNG out of the bundle and allocate its image id *before*
+        // borrowing the target output, since both need `&mut self`. An id is
+        // only wasted in the (practically impossible) case of an image arriving
+        // on the silent introspection follow-up.
+        let new_image = match &msg.content {
+            JupyterMessageContent::DisplayData(data) => media_to_png(&data.data),
+            JupyterMessageContent::ExecuteResult(result) => media_to_png(&result.data),
+            _ => None,
+        }
+        .map(str::to_string)
+        .and_then(|base64| JupyterImage::from_png_base64(self.alloc_jupyter_image_id(), base64));
 
         let Some((output, is_inspect)) = self.find_target(&execution_id) else {
             return false;
@@ -74,20 +86,28 @@ impl Editor {
                 output.push_text(&stream.text, kind);
                 true
             }
-            JupyterMessageContent::ExecuteResult(result) => match media_to_text(&result.data) {
-                Some(text) => {
+            JupyterMessageContent::ExecuteResult(result) => {
+                if let Some(image) = new_image {
+                    output.images.push(image);
+                    true
+                } else if let Some(text) = media_to_text(&result.data) {
                     output.push_text(&text, OutputKind::Result);
                     true
+                } else {
+                    false
                 }
-                None => false,
-            },
-            JupyterMessageContent::DisplayData(data) => match media_to_text(&data.data) {
-                Some(text) => {
+            }
+            JupyterMessageContent::DisplayData(data) => {
+                if let Some(image) = new_image {
+                    output.images.push(image);
+                    true
+                } else if let Some(text) = media_to_text(&data.data) {
                     output.push_text(&text, OutputKind::Result);
                     true
+                } else {
+                    false
                 }
-                None => false,
-            },
+            }
             JupyterMessageContent::ErrorOutput(err) => {
                 output.state = ExecutionState::Error;
                 if err.traceback.is_empty() {

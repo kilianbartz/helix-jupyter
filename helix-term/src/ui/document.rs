@@ -431,6 +431,19 @@ impl<'a> TextRenderer<'a> {
             .set_stringn(x, y + self.viewport.y, string, width, style);
     }
 
+    /// Set a single cell's `symbol` and `style` directly, bypassing grapheme
+    /// width handling. Used to lay out fixed-width graphics placeholder cells.
+    /// `x` is absolute; `y` is relative to the renderer's viewport.
+    pub fn set_cell(&mut self, x: u16, y: u16, symbol: &str, style: Style) {
+        if (y as usize) < self.offset.row {
+            return;
+        }
+        let y = y + self.viewport.y;
+        if self.surface.in_bounds(x, y) {
+            self.surface[(x, y)].set_symbol(symbol).set_style(style);
+        }
+    }
+
     /// Sets the style of an area **within the text viewport* this accounts
     /// both for the renderers vertical offset and its viewport
     pub fn set_style(&mut self, mut area: Rect, style: Style) {

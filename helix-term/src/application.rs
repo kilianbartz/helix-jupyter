@@ -67,6 +67,32 @@ type TerminalEvent = crossterm::event::Event;
 
 type Terminal = tui::terminal::Terminal<TerminalBackend>;
 
+/// Number of cells `(cols, rows)` an image of the given pixel size occupies,
+/// scaled down to fit `max_cols` while preserving aspect ratio. Capped at the
+/// number of kitty rowcolumn diacritics that can address individual cells.
+fn image_cell_size(
+    width_px: u32,
+    height_px: u32,
+    cell_w: u16,
+    cell_h: u16,
+    max_cols: u16,
+) -> (u16, u16) {
+    const MAX_CELLS: u32 = 297;
+    let cell_w = (cell_w.max(1)) as u32;
+    let cell_h = (cell_h.max(1)) as u32;
+    let natural_cols = width_px.div_ceil(cell_w).max(1);
+    let natural_rows = height_px.div_ceil(cell_h).max(1);
+    let max_cols = (max_cols as u32).max(1);
+    let (cols, rows) = if natural_cols > max_cols {
+        // Preserve aspect ratio when shrinking to fit the available width.
+        let rows = (natural_rows * max_cols).div_ceil(natural_cols).max(1);
+        (max_cols, rows)
+    } else {
+        (natural_cols, natural_rows)
+    };
+    (cols.min(MAX_CELLS) as u16, rows.min(MAX_CELLS) as u16)
+}
+
 pub struct Application {
     compositor: Compositor,
     terminal: Terminal,
@@ -271,6 +297,8 @@ impl Application {
             self.compositor.full_redraw = false;
         }
 
+        self.sync_jupyter_images();
+
         let mut cx = crate::compositor::Context {
             editor: &mut self.editor,
             jobs: &mut self.jobs,
@@ -296,6 +324,58 @@ impl Application {
 
         let pos = pos.map(|pos| (pos.col as u16, pos.row as u16));
         self.terminal.draw(pos, kind).unwrap();
+    }
+
+    /// Resolve inline Jupyter image placements, transmit any new images to the
+    /// terminal, and delete images whose output blocks were replaced or cleared.
+    /// Runs before each render so placements are known when the layout is built.
+    fn sync_jupyter_images(&mut self) {
+        use helix_view::jupyter::ImagePlacement;
+
+        let backend = self.terminal.backend();
+        let supported =
+            backend.supports_graphics() && self.editor.config().jupyter.inline_images;
+        let cell_size = backend.cell_pixel_size();
+        let max_cols = self.terminal.size().width.saturating_sub(8).max(1);
+
+        if self.editor.jupyter_pending_image_deletions.is_empty()
+            && self
+                .editor
+                .documents()
+                .all(|doc| doc.jupyter_outputs.iter().all(|o| o.images.is_empty()))
+        {
+            return;
+        }
+
+        let backend = self.terminal.backend_mut();
+        for id in self.editor.jupyter_pending_image_deletions.drain(..) {
+            let _ = backend.delete_image(id);
+        }
+
+        for doc in self.editor.documents_mut() {
+            for output in &mut doc.jupyter_outputs {
+                for image in &mut output.images {
+                    if image.transmitted {
+                        continue;
+                    }
+                    image.transmitted = true;
+                    match (supported, cell_size) {
+                        (true, Some((cell_w, cell_h))) => {
+                            let (cols, rows) = image_cell_size(
+                                image.width_px,
+                                image.height_px,
+                                cell_w,
+                                cell_h,
+                                max_cols,
+                            );
+                            image.placement = ImagePlacement::Kitty { rows, cols };
+                            let _ = backend.transmit_image(image.id, cols, rows, &image.base64);
+                        }
+                        _ => image.placement = ImagePlacement::Fallback,
+                    }
+                }
+            }
+        }
     }
 
     pub async fn event_loop<S>(&mut self, input_stream: &mut S)
