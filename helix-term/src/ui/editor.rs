@@ -8,7 +8,9 @@ use crate::{
     ui::{
         document::{render_document, LinePos, TextRenderer},
         statusline,
-        text_decorations::{self, Decoration, DecorationManager, InlineDiagnostics},
+        text_decorations::{
+            self, Decoration, DecorationManager, InlineDiagnostics, JupyterOutputs,
+        },
         Completion, ProgressSpinners,
     },
 };
@@ -205,6 +207,14 @@ impl EditorView {
             inline_diagnostic_config,
             config.end_of_line_diagnostics,
         ));
+
+        if config.jupyter.enable && config.jupyter.inline_output {
+            let outputs = JupyterOutputs::new(doc, theme, config.jupyter.max_output_lines);
+            if !outputs.is_empty() {
+                decorations.add_decoration(outputs);
+            }
+        }
+
         render_document(
             surface,
             inner,

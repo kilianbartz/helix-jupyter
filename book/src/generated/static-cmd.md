@@ -295,6 +295,11 @@
 | `dap_switch_stack_frame` | Switch stack frame | normal: `` <space>Gsf ``, select: `` <space>Gsf `` |
 | `dap_enable_exceptions` | Enable exception breakpoints | normal: `` <space>Ge ``, select: `` <space>Ge `` |
 | `dap_disable_exceptions` | Disable exception breakpoints | normal: `` <space>GE ``, select: `` <space>GE `` |
+| `jupyter_eval` | Evaluate selection in Jupyter kernel |  |
+| `jupyter_variables` | Show Jupyter variable inspector |  |
+| `jupyter_kernel_select` | Select and start a Jupyter kernel |  |
+| `jupyter_restart` | Restart Jupyter kernel |  |
+| `jupyter_stop` | Stop Jupyter kernel |  |
 | `shell_pipe` | Pipe selections through shell command | normal: `` \| ``, select: `` \| `` |
 | `shell_pipe_to` | Pipe selections into shell command ignoring output | normal: `` <A-\|> ``, select: `` <A-\|> `` |
 | `shell_insert_output` | Insert shell command output before selections | normal: `` ! ``, select: `` ! `` |

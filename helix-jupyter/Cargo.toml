@@ -1,0 +1,34 @@
+[package]
+name = "helix-jupyter"
+description = "Jupyter kernel client implementation for Helix project"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+categories.workspace = true
+repository.workspace = true
+homepage.workspace = true
+
+[dependencies]
+helix-stdx = { path = "../helix-stdx" }
+helix-core = { path = "../helix-core" }
+
+anyhow = "1.0"
+log = "0.4"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+tokio = { version = "1", features = ["rt", "rt-multi-thread", "io-util", "io-std", "time", "process", "macros", "fs", "parking_lot", "net", "sync"] }
+thiserror.workspace = true
+slotmap.workspace = true
+futures-executor.workspace = true
+futures-util.workspace = true
+tokio-stream.workspace = true
+
+jupyter-protocol = "2"
+jupyter-zmq-client = { version = "1", features = ["tokio-runtime"] }
+zeromq = { version = "0.6", default-features = false }
+uuid = { version = "1", features = ["v4"] }
+
+[dev-dependencies]
+fern = "0.7"

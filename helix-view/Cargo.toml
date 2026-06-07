@@ -22,6 +22,7 @@ helix-event = { path = "../helix-event" }
 helix-loader = { path = "../helix-loader" }
 helix-lsp = { path = "../helix-lsp" }
 helix-dap = { path = "../helix-dap" }
+helix-jupyter = { path = "../helix-jupyter" }
 helix-vcs = { path = "../helix-vcs" }
 
 bitflags.workspace = true

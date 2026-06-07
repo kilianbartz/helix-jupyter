@@ -7,8 +7,10 @@ use helix_view::editor::CursorCache;
 use crate::ui::document::{LinePos, TextRenderer};
 
 pub use diagnostics::InlineDiagnostics;
+pub use jupyter::JupyterOutputs;
 
 mod diagnostics;
+mod jupyter;
 
 /// Decorations are the primary mechanism for extending the text rendering.
 ///

@@ -528,6 +528,14 @@ impl View {
             ));
         }
 
+        let jupyter = doc.config.load().jupyter.clone();
+        if jupyter.enable && jupyter.inline_output && !doc.jupyter_outputs.is_empty() {
+            text_annotations.add_line_annotation(crate::jupyter::JupyterLineAnnotation::new(
+                doc,
+                jupyter.max_output_lines,
+            ));
+        }
+
         text_annotations
     }
 

@@ -8,6 +8,7 @@ use crate::{DocumentId, Editor, ViewId};
 pub mod completion;
 pub mod dap;
 pub mod diagnostics;
+pub mod jupyter;
 pub mod lsp;
 pub mod word_index;
 

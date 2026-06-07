@@ -1,4 +1,5 @@
 pub(crate) mod dap;
+pub(crate) mod jupyter;
 pub(crate) mod lsp;
 pub(crate) mod syntax;
 pub(crate) mod typed;
@@ -11,6 +12,9 @@ use helix_stdx::{
     rope::{self, RopeSliceExt},
 };
 use helix_vcs::{FileChange, Hunk};
+pub use jupyter::{
+    jupyter_eval, jupyter_kernel_select, jupyter_restart, jupyter_stop, jupyter_variables,
+};
 pub use lsp::*;
 pub use syntax::*;
 use tui::{
@@ -598,6 +602,11 @@ impl MappableCommand {
         dap_switch_stack_frame, "Switch stack frame",
         dap_enable_exceptions, "Enable exception breakpoints",
         dap_disable_exceptions, "Disable exception breakpoints",
+        jupyter_eval, "Evaluate selection in Jupyter kernel",
+        jupyter_variables, "Show Jupyter variable inspector",
+        jupyter_kernel_select, "Select and start a Jupyter kernel",
+        jupyter_restart, "Restart Jupyter kernel",
+        jupyter_stop, "Stop Jupyter kernel",
         shell_pipe, "Pipe selections through shell command",
         shell_pipe_to, "Pipe selections into shell command ignoring output",
         shell_insert_output, "Insert shell command output before selections",

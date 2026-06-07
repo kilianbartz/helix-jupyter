@@ -678,6 +678,12 @@ impl Application {
                     self.render().await;
                 }
             }
+            EditorEvent::JupyterEvent((id, payload)) => {
+                let needs_render = self.editor.handle_jupyter_message(id, payload).await;
+                if needs_render {
+                    self.render().await;
+                }
+            }
             EditorEvent::Redraw => {
                 self.render().await;
             }

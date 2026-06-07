@@ -2061,6 +2061,102 @@ fn debug_start(cx: &mut compositor::Context, args: Args, event: PromptEvent) -> 
     dap_start_impl(cx, name.as_deref(), None, Some(args))
 }
 
+fn jupyter_start(
+    cx: &mut compositor::Context,
+    args: Args,
+    event: PromptEvent,
+) -> anyhow::Result<()> {
+    if event != PromptEvent::Validate {
+        return Ok(());
+    }
+
+    let doc_id = doc!(cx.editor).id();
+    let name = match args.first() {
+        Some(name) => name.to_string(),
+        None => cx
+            .editor
+            .config()
+            .jupyter
+            .default_kernel
+            .clone()
+            .ok_or_else(|| anyhow!("No kernel name given and no default-kernel configured"))?,
+    };
+    crate::commands::jupyter::jupyter_start_impl(cx.editor, doc_id, &name)?;
+    Ok(())
+}
+
+fn jupyter_stop(
+    cx: &mut compositor::Context,
+    _args: Args,
+    event: PromptEvent,
+) -> anyhow::Result<()> {
+    if event != PromptEvent::Validate {
+        return Ok(());
+    }
+    crate::commands::jupyter::jupyter_stop_impl(cx.editor);
+    Ok(())
+}
+
+fn jupyter_restart(
+    cx: &mut compositor::Context,
+    _args: Args,
+    event: PromptEvent,
+) -> anyhow::Result<()> {
+    if event != PromptEvent::Validate {
+        return Ok(());
+    }
+    crate::commands::jupyter::jupyter_restart_impl(cx.editor);
+    Ok(())
+}
+
+fn jupyter_eval(
+    cx: &mut compositor::Context,
+    _args: Args,
+    event: PromptEvent,
+) -> anyhow::Result<()> {
+    if event != PromptEvent::Validate {
+        return Ok(());
+    }
+    crate::commands::jupyter::jupyter_eval_impl(cx.editor);
+    Ok(())
+}
+
+fn jupyter_variables(
+    cx: &mut compositor::Context,
+    _args: Args,
+    event: PromptEvent,
+) -> anyhow::Result<()> {
+    if event != PromptEvent::Validate {
+        return Ok(());
+    }
+    let callback = job::Callback::EditorCompositor(Box::new(|editor, compositor| {
+        match crate::commands::jupyter::variables_popup(editor) {
+            Some(popup) => compositor.replace_or_push("jupyter-variables", popup),
+            None => editor.set_status("No Jupyter variables to show (evaluate a selection first)"),
+        }
+    }));
+    cx.jobs.callback(std::future::ready(Ok(callback)));
+    Ok(())
+}
+
+fn jupyter_kernel_select(
+    cx: &mut compositor::Context,
+    _args: Args,
+    event: PromptEvent,
+) -> anyhow::Result<()> {
+    if event != PromptEvent::Validate {
+        return Ok(());
+    }
+    let callback = job::Callback::EditorCompositor(Box::new(|editor, compositor| {
+        match crate::commands::jupyter::kernel_picker(editor) {
+            Some(layer) => compositor.push(layer),
+            None => editor.set_error("No Jupyter kernelspecs found"),
+        }
+    }));
+    cx.jobs.callback(std::future::ready(Ok(callback)));
+    Ok(())
+}
+
 fn debug_remote(
     cx: &mut compositor::Context,
     args: Args,
@@ -3603,6 +3699,72 @@ pub const TYPABLE_COMMAND_LIST: &[TypableCommand] = &[
         completer: CommandCompleter::none(),
         signature: Signature {
             positionals: (0, None),
+            ..Signature::DEFAULT
+        },
+    },
+    TypableCommand {
+        name: "jupyter-start",
+        aliases: &["jstart"],
+        doc: "Start a Jupyter kernel (by kernelspec name) for the current document.",
+        fun: jupyter_start,
+        completer: CommandCompleter::none(),
+        signature: Signature {
+            positionals: (0, Some(1)),
+            ..Signature::DEFAULT
+        },
+    },
+    TypableCommand {
+        name: "jupyter-stop",
+        aliases: &["jstop"],
+        doc: "Stop the current document's Jupyter kernel.",
+        fun: jupyter_stop,
+        completer: CommandCompleter::none(),
+        signature: Signature {
+            positionals: (0, Some(0)),
+            ..Signature::DEFAULT
+        },
+    },
+    TypableCommand {
+        name: "jupyter-restart",
+        aliases: &[],
+        doc: "Restart the current document's Jupyter kernel.",
+        fun: jupyter_restart,
+        completer: CommandCompleter::none(),
+        signature: Signature {
+            positionals: (0, Some(0)),
+            ..Signature::DEFAULT
+        },
+    },
+    TypableCommand {
+        name: "jupyter-eval",
+        aliases: &["jeval"],
+        doc: "Evaluate the current selection in the Jupyter kernel.",
+        fun: jupyter_eval,
+        completer: CommandCompleter::none(),
+        signature: Signature {
+            positionals: (0, Some(0)),
+            ..Signature::DEFAULT
+        },
+    },
+    TypableCommand {
+        name: "jupyter-variables",
+        aliases: &["jvars"],
+        doc: "Show the Jupyter variable inspector for the current document.",
+        fun: jupyter_variables,
+        completer: CommandCompleter::none(),
+        signature: Signature {
+            positionals: (0, Some(0)),
+            ..Signature::DEFAULT
+        },
+    },
+    TypableCommand {
+        name: "jupyter-kernel-select",
+        aliases: &["jkernel"],
+        doc: "Pick a kernelspec to start for the current document.",
+        fun: jupyter_kernel_select,
+        completer: CommandCompleter::none(),
+        signature: Signature {
+            positionals: (0, Some(0)),
             ..Signature::DEFAULT
         },
     },

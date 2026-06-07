@@ -63,6 +63,12 @@
 | `:tree-sitter-highlight-name` | Display name of tree-sitter highlight scope under the cursor. |
 | `:tree-sitter-layers` | Display language names of tree-sitter injection layers under the cursor. |
 | `:debug-start`, `:dbg` | Start a debug session from a given template with given parameters. |
+| `:jupyter-start`, `:jstart` | Start a Jupyter kernel (by kernelspec name) for the current document. |
+| `:jupyter-stop`, `:jstop` | Stop the current document's Jupyter kernel. |
+| `:jupyter-restart` | Restart the current document's Jupyter kernel. |
+| `:jupyter-eval`, `:jeval` | Evaluate the current selection in the Jupyter kernel. |
+| `:jupyter-variables`, `:jvars` | Show the Jupyter variable inspector for the current document. |
+| `:jupyter-kernel-select`, `:jkernel` | Pick a kernelspec to start for the current document. |
 | `:debug-remote`, `:dbg-tcp` | Connect to a debug adapter by TCP address and start a debugging session from a given template with given parameters. |
 | `:debug-eval` | Evaluate expression in current debug context. |
 | `:vsplit`, `:vs` | Open the file in a vertical split. |

@@ -53,6 +53,7 @@ use helix_core::{
     Change, LineEnding, Position, Range, Selection, Uri, NATIVE_LINE_ENDING,
 };
 use helix_dap::{self as dap, registry::DebugAdapterId};
+use helix_jupyter::{self as jupyter, registry::KernelId};
 use helix_lsp::lsp;
 use helix_stdx::path::canonicalize;
 
@@ -432,8 +433,41 @@ pub struct Config {
     /// Whether to enable Kitty Keyboard Protocol
     pub kitty_keyboard_protocol: KittyKeyboardProtocolConfig,
     pub buffer_picker: BufferPickerConfig,
+    /// Jupyter REPL integration.
+    pub jupyter: JupyterConfig,
     /// Whether to implicitly trust every workspace or not
     pub insecure: bool,
+}
+
+#[derive(Debug, PartialEq, Eq, Deserialize, Serialize, Clone)]
+#[serde(default, rename_all = "kebab-case")]
+pub struct JupyterConfig {
+    /// Master switch for the Jupyter REPL feature.
+    pub enable: bool,
+    /// Kernelspec name started by `:jupyter-start` when none is given.
+    pub default_kernel: Option<String>,
+    /// Start a kernel automatically on the first evaluation in a document.
+    pub auto_start: bool,
+    /// Render execution output as virtual lines below the evaluated selection.
+    pub inline_output: bool,
+    /// Maximum number of output lines rendered inline per execution block.
+    pub max_output_lines: usize,
+    /// Probe the kernel for the values of variables in the evaluated selection,
+    /// shown via the `:jupyter-variables` inspector.
+    pub inspect_variables: bool,
+}
+
+impl Default for JupyterConfig {
+    fn default() -> Self {
+        Self {
+            enable: true,
+            default_kernel: None,
+            auto_start: true,
+            inline_output: true,
+            max_output_lines: 20,
+            inspect_variables: true,
+        }
+    }
 }
 
 #[derive(Debug, Default, PartialEq, Eq, PartialOrd, Ord, Deserialize, Serialize, Clone, Copy)]
@@ -1150,6 +1184,7 @@ impl Default for Config {
             indent_heuristic: IndentationHeuristic::default(),
             jump_label_alphabet: ('a'..='z').collect(),
             inline_diagnostics: InlineDiagnosticsConfig::default(),
+            jupyter: JupyterConfig::default(),
             end_of_line_diagnostics: DiagnosticFilter::Enable(Severity::Hint),
             clipboard_provider: ClipboardProvider::default(),
             editor_config: true,
@@ -1212,6 +1247,8 @@ pub struct Editor {
     pub debug_adapters: dap::registry::Registry,
     pub breakpoints: HashMap<PathBuf, Vec<Breakpoint>>,
 
+    pub jupyter: jupyter::registry::Registry,
+
     pub syn_loader: Arc<ArcSwap<syntax::Loader>>,
     pub theme_loader: Arc<theme::Loader>,
     /// last_theme is used for theme previews. We store the current theme here,
@@ -1269,6 +1306,7 @@ pub enum EditorEvent {
     ConfigEvent(ConfigEvent),
     LanguageServerMessage((LanguageServerId, Call)),
     DebuggerEvent((DebugAdapterId, dap::Payload)),
+    JupyterEvent((KernelId, jupyter::Payload)),
     IdleTimer,
     Redraw,
 }
@@ -1357,6 +1395,7 @@ impl Editor {
             diagnostics: Diagnostics::new(),
             diff_providers: DiffProviderRegistry::default(),
             debug_adapters: dap::registry::Registry::new(),
+            jupyter: jupyter::registry::Registry::new(),
             breakpoints: HashMap::new(),
             syn_loader,
             theme_loader,
@@ -2391,6 +2430,9 @@ impl Editor {
                 }
                 Some(event) = self.debug_adapters.incoming.next() => {
                     return EditorEvent::DebuggerEvent(event)
+                }
+                Some(event) = self.jupyter.incoming.next() => {
+                    return EditorEvent::JupyterEvent(event)
                 }
 
                 _ = helix_event::redraw_requested() => {

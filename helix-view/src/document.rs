@@ -199,6 +199,11 @@ pub struct Document {
     pub(crate) diagnostics: Vec<Diagnostic>,
     pub(crate) language_servers: HashMap<LanguageServerName, Arc<Client>>,
 
+    /// Jupyter execution output blocks rendered inline below evaluated lines.
+    pub jupyter_outputs: Vec<crate::jupyter::JupyterOutput>,
+    /// The kernel this document evaluates against, if any.
+    pub jupyter_kernel: Option<helix_jupyter::KernelId>,
+
     diff_handle: Option<DiffHandle>,
     version_control_head: Option<Arc<ArcSwap<Box<str>>>>,
 
@@ -742,6 +747,8 @@ impl Document {
             changes,
             old_state,
             diagnostics: Vec::new(),
+            jupyter_outputs: Vec::new(),
+            jupyter_kernel: None,
             version: 0,
             history: Cell::new(History::default()),
             savepoints: Vec::new(),
@@ -1552,6 +1559,13 @@ impl Document {
                 diagnostic.provider.clone(),
             )
         });
+
+        // Keep Jupyter output blocks anchored to their evaluated line across edits.
+        changes.update_positions(
+            self.jupyter_outputs
+                .iter_mut()
+                .map(|output| (&mut output.anchor, Assoc::After)),
+        );
 
         // Update the inlay hint annotations' positions, helping ensure they are displayed in the proper place
         let apply_inlay_hint_changes = |annotations: &mut Vec<InlineAnnotation>| {
