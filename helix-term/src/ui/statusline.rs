@@ -70,6 +70,12 @@ pub fn render(context: &mut RenderContext, viewport: Rect, surface: &mut Surface
         });
     }
 
+    // Jupyter kernel-startup progress. Not a configurable element: it only renders
+    // while the current document's kernel is booting, then disappears.
+    render_jupyter_status(context, |context, span| {
+        append(&mut context.parts.left, span, base_style)
+    });
+
     surface.set_spans(
         viewport.x,
         viewport.y,
@@ -209,6 +215,23 @@ where
             .unwrap_or(" ")
             .into(),
     );
+}
+
+/// Render an animated spinner and "Starting <kernel>…" while the current
+/// document's Jupyter kernel is booting. Renders nothing otherwise.
+fn render_jupyter_status<'a, F>(context: &mut RenderContext<'a>, write: F)
+where
+    F: Fn(&mut RenderContext<'a>, Span<'a>) + Copy,
+{
+    let Some(kernel) = context.doc.jupyter_kernel else {
+        return;
+    };
+    let Some((name, since)) = context.editor.jupyter.starting(kernel) else {
+        return;
+    };
+    let frame = crate::ui::Spinner::dots_frame_at(since);
+    let content = format!(" {frame} Starting {name}… ");
+    write(context, Span::raw(content));
 }
 
 fn render_diagnostics<'a, F>(context: &mut RenderContext<'a>, write: F)

@@ -11,7 +11,20 @@ use helix_core::text_annotations::LineAnnotation;
 use helix_core::Position;
 use helix_jupyter::KernelId;
 
-use crate::Document;
+use crate::{Document, DocumentId};
+
+/// A `:jupyter-eval` request deferred until the document's kernel finishes
+/// starting. Replayed by the command layer when the kernel becomes `Ready`.
+#[derive(Debug, Clone)]
+pub struct PendingEval {
+    pub kernel: KernelId,
+    pub doc_id: DocumentId,
+    pub code: String,
+    /// Char index the output block anchors to (below the last evaluated line).
+    pub anchor: usize,
+    /// Last document line spanned by the evaluation (used to replace prior output).
+    pub last_line: usize,
+}
 
 /// Strip ANSI/CSI escape sequences from kernel output (tracebacks are colorized).
 pub fn strip_ansi(input: &str) -> String {

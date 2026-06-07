@@ -13,7 +13,7 @@ pub mod registry;
 
 pub use client::Client;
 pub use messages::{media_to_png, media_to_text, Channel, Payload};
-pub use registry::{KernelId, Registry};
+pub use registry::{KernelId, KernelStart, Registry, StartOutcome};
 
 // Re-export the protocol types callers need to inspect messages.
 pub use jupyter_protocol::{

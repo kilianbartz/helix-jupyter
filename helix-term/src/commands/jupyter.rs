@@ -1,9 +1,12 @@
 use super::{Context, Editor};
 use crate::ui;
 
+use std::time::Duration;
+
 use anyhow::{anyhow, bail};
 use helix_jupyter::registry::KernelId;
-use helix_view::jupyter::JupyterOutput;
+use helix_jupyter::{KernelStart, StartOutcome};
+use helix_view::jupyter::{JupyterOutput, PendingEval};
 use helix_view::DocumentId;
 
 /// Resolve the kernelspec name to start when `:jupyter-start` is given no
@@ -11,23 +14,14 @@ use helix_view::DocumentId;
 /// virtualenv that ships Jupyter, then falls back to the configured
 /// `editor.jupyter.default-kernel`.
 pub fn default_kernel_name(editor: &Editor) -> Option<String> {
-    helix_jupyter::active_venv_kernel()
-        .or_else(|| editor.config().jupyter.default_kernel.clone())
+    helix_jupyter::active_venv_kernel().or_else(|| editor.config().jupyter.default_kernel.clone())
 }
 
-/// Ensure the document has a running kernel, auto-starting one from the active
-/// venv or `editor.jupyter.default-kernel` when configured.
-fn ensure_kernel(editor: &mut Editor, doc_id: DocumentId) -> anyhow::Result<KernelId> {
-    if let Some(kernel) = editor
-        .documents
-        .get(&doc_id)
-        .and_then(|doc| doc.jupyter_kernel)
-    {
-        if editor.jupyter.get_client(kernel).is_some() {
-            return Ok(kernel);
-        }
-    }
-
+/// Auto-start a kernel for the document (from the active venv or
+/// `editor.jupyter.default-kernel`) when configured, returning the new `Starting`
+/// kernel's id. Errors if the feature is disabled, auto-start is off, or no
+/// kernel can be resolved.
+fn begin_auto_start(editor: &mut Editor, doc_id: DocumentId) -> anyhow::Result<KernelId> {
     let config = editor.config().jupyter.clone();
     if !config.enable {
         bail!("Jupyter integration is disabled (editor.jupyter.enable = false)");
@@ -40,24 +34,78 @@ fn ensure_kernel(editor: &mut Editor, doc_id: DocumentId) -> anyhow::Result<Kern
             "No kernel selected. Activate a Jupyter venv, set editor.jupyter.default-kernel, or run :jupyter-start <kernel>"
         )
     })?;
-    jupyter_start_impl(editor, doc_id, &name)
+    Ok(begin_kernel_start(editor, doc_id, &name))
 }
 
-/// Start a kernel and associate it with the document.
-pub fn jupyter_start_impl(
-    editor: &mut Editor,
-    doc_id: DocumentId,
-    kernel_name: &str,
-) -> anyhow::Result<KernelId> {
-    let id = editor
-        .jupyter
-        .start_client(kernel_name)
-        .map_err(|err| anyhow!("Failed to start kernel '{kernel_name}': {err}"))?;
+/// Begin starting a kernel for the document without blocking the editor. Returns
+/// the (`Starting`) kernel id immediately; the kernel becomes usable once the
+/// background start completes and [`on_kernel_started`] promotes it.
+pub fn begin_kernel_start(editor: &mut Editor, doc_id: DocumentId, kernel_name: &str) -> KernelId {
+    let (id, mut done_rx) = editor.jupyter.start_client(kernel_name);
     if let Some(doc) = editor.documents.get_mut(&doc_id) {
         doc.jupyter_kernel = Some(id);
     }
-    editor.set_status(format!("Started Jupyter kernel '{kernel_name}'"));
-    Ok(id)
+    editor.set_status(format!("Starting Jupyter kernel '{kernel_name}'…"));
+
+    // The kernel emits no events while booting, so nothing would re-render the
+    // status-line spinner. Nudge a redraw on an interval until the start finishes.
+    tokio::spawn(async move {
+        loop {
+            tokio::select! {
+                _ = &mut done_rx => break,
+                _ = tokio::time::sleep(Duration::from_millis(80)) => helix_event::request_redraw(),
+            }
+        }
+    });
+
+    id
+}
+
+/// Start a kernel for the document (used by `:jupyter-start` and the kernel
+/// picker). Non-blocking; see [`begin_kernel_start`].
+pub fn jupyter_start_impl(editor: &mut Editor, doc_id: DocumentId, kernel_name: &str) -> KernelId {
+    begin_kernel_start(editor, doc_id, kernel_name)
+}
+
+/// Apply a completed background kernel start: report status, and replay (or drop)
+/// any evaluations queued while the kernel was booting.
+pub fn on_kernel_started(editor: &mut Editor, start: KernelStart) {
+    match editor.jupyter.finish_start(start) {
+        StartOutcome::Started { id, name } => {
+            editor.set_status(format!("Started Jupyter kernel '{name}'"));
+            for ev in take_pending_evals(editor, id) {
+                run_eval(editor, ev.doc_id, id, ev.code, ev.anchor, ev.last_line);
+            }
+        }
+        StartOutcome::Failed { id, name, error } => {
+            editor.set_error(format!("Failed to start kernel '{name}': {error}"));
+            // Detach the failed kernel from any document and drop its queued evals.
+            for doc in editor.documents.values_mut() {
+                if doc.jupyter_kernel == Some(id) {
+                    doc.jupyter_kernel = None;
+                }
+            }
+            editor.jupyter_pending_evals.retain(|ev| ev.kernel != id);
+        }
+        StartOutcome::Cancelled { id } => {
+            editor.jupyter_pending_evals.retain(|ev| ev.kernel != id);
+        }
+    }
+}
+
+/// Remove and return the queued evaluations belonging to `kernel`, preserving order.
+fn take_pending_evals(editor: &mut Editor, kernel: KernelId) -> Vec<PendingEval> {
+    let mut mine = Vec::new();
+    let mut keep = Vec::new();
+    for ev in editor.jupyter_pending_evals.drain(..) {
+        if ev.kernel == kernel {
+            mine.push(ev);
+        } else {
+            keep.push(ev);
+        }
+    }
+    editor.jupyter_pending_evals = keep;
+    mine
 }
 
 /// Clear a document's Jupyter outputs, queuing all their inline images for
@@ -111,14 +159,59 @@ pub fn jupyter_eval_impl(editor: &mut Editor) {
     let last_line = end_line;
     let anchor = from_char.max(slice.line_to_char(end_line));
 
-    let kernel = match ensure_kernel(editor, doc_id) {
+    // If a kernel is already connected, evaluate immediately.
+    if let Some(kernel) = editor
+        .documents
+        .get(&doc_id)
+        .and_then(|doc| doc.jupyter_kernel)
+    {
+        if editor.jupyter.get_client(kernel).is_some() {
+            run_eval(editor, doc_id, kernel, code, anchor, last_line);
+            return;
+        }
+        // The kernel is still booting: defer this evaluation until it is ready.
+        if editor.jupyter.is_starting(kernel) {
+            editor.jupyter_pending_evals.push(PendingEval {
+                kernel,
+                doc_id,
+                code,
+                anchor,
+                last_line,
+            });
+            editor.set_status("Kernel is starting; evaluation queued");
+            return;
+        }
+    }
+
+    // No running or starting kernel: auto-start one (if configured) and queue the
+    // evaluation to run once it connects.
+    let kernel = match begin_auto_start(editor, doc_id) {
         Ok(kernel) => kernel,
         Err(err) => {
             editor.set_error(err.to_string());
             return;
         }
     };
+    editor.jupyter_pending_evals.push(PendingEval {
+        kernel,
+        doc_id,
+        code,
+        anchor,
+        last_line,
+    });
+}
 
+/// Execute `code` in the document's (ready) `kernel`, firing the optional
+/// variable-introspection follow-up and creating the output block anchored below
+/// the last evaluated line (replacing any previous output on that line).
+fn run_eval(
+    editor: &mut Editor,
+    doc_id: DocumentId,
+    kernel: KernelId,
+    code: String,
+    anchor: usize,
+    last_line: usize,
+) {
     let execution_id = match editor.jupyter.get_client(kernel) {
         Some(client) => match client.execute(code.clone(), false) {
             Ok(id) => id,
@@ -308,9 +401,7 @@ pub fn kernel_picker(editor: &Editor) -> Option<Box<dyn crate::compositor::Compo
     ];
 
     let picker = ui::Picker::new(columns, 0, kernels, (), move |cx, kernel, _action| {
-        if let Err(err) = jupyter_start_impl(cx.editor, doc_id, &kernel.name) {
-            cx.editor.set_error(err.to_string());
-        }
+        jupyter_start_impl(cx.editor, doc_id, &kernel.name);
     });
 
     Some(Box::new(ui::overlay::overlaid(picker)))
@@ -350,6 +441,9 @@ pub fn jupyter_stop_impl(editor: &mut Editor) {
         let _ = client.shutdown(false);
     }
     editor.jupyter.remove_client(kernel);
+    editor
+        .jupyter_pending_evals
+        .retain(|ev| ev.kernel != kernel);
     if let Some(doc) = editor.document_mut(doc_id) {
         doc.jupyter_kernel = None;
     }
@@ -374,6 +468,9 @@ pub fn jupyter_restart_impl(editor: &mut Editor) {
         .get_client(kernel)
         .map(|client| client.name().to_string());
     editor.jupyter.remove_client(kernel);
+    editor
+        .jupyter_pending_evals
+        .retain(|ev| ev.kernel != kernel);
     if let Some(doc) = editor.document_mut(doc_id) {
         doc.jupyter_kernel = None;
     }
@@ -382,8 +479,5 @@ pub fn jupyter_restart_impl(editor: &mut Editor) {
         editor.set_error("Could not determine kernel to restart");
         return;
     };
-    match jupyter_start_impl(editor, doc_id, &name) {
-        Ok(_) => editor.set_status("Restarted Jupyter kernel"),
-        Err(err) => editor.set_error(err.to_string()),
-    }
+    begin_kernel_start(editor, doc_id, &name);
 }

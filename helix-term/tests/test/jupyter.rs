@@ -6,6 +6,53 @@ use helix_view::jupyter::{ExecutionState, JupyterOutput};
 
 use super::helpers::AppBuilder;
 
+/// Exercise the non-blocking kernel start: kick off `start_client`, pump the
+/// editor event loop until the `JupyterKernelStarted` event arrives, apply it
+/// with `finish_start`, and assert the kernel is then `Ready` (a usable client)
+/// while being `is_starting` beforehand.
+///
+/// Requires a kernelspec named `helix-test`; skips itself if none is installed.
+#[tokio::test(flavor = "multi_thread")]
+async fn jupyter_async_start_becomes_ready() -> anyhow::Result<()> {
+    let mut app = AppBuilder::new().build()?;
+    let editor = &mut app.editor;
+
+    let (id, _done) = editor.jupyter.start_client("helix-test");
+    // Before the background start finishes, the slot is `Starting`, not usable.
+    assert!(editor.jupyter.is_starting(id));
+    assert!(editor.jupyter.get_client(id).is_none());
+
+    let deadline = Instant::now() + Duration::from_secs(20);
+    let mut ready = false;
+    while Instant::now() < deadline {
+        let Ok(event) = tokio::time::timeout(Duration::from_secs(20), editor.wait_event()).await
+        else {
+            break;
+        };
+        if let EditorEvent::JupyterKernelStarted(start) = event {
+            let (started_id, _name, result) = &start;
+            assert_eq!(*started_id, id);
+            if result.is_err() {
+                eprintln!("skipping: `helix-test` kernel failed to start: {result:?}");
+                return Ok(());
+            }
+            editor.jupyter.finish_start(start);
+            ready = true;
+            break;
+        }
+    }
+
+    assert!(ready, "kernel start event never arrived");
+    assert!(!editor.jupyter.is_starting(id));
+    assert!(
+        editor.jupyter.get_client(id).is_some(),
+        "kernel should be Ready after finish_start"
+    );
+
+    editor.jupyter.remove_client(id);
+    Ok(())
+}
+
 /// End-to-end check of the Jupyter integration through the real `Editor` event
 /// path: start a kernel, run two executions (proving state persists), pump the
 /// editor event loop, and assert the output is routed into the document's
@@ -21,7 +68,7 @@ async fn jupyter_eval_routes_output_to_document() -> anyhow::Result<()> {
     let editor = &mut app.editor;
     let doc_id = doc!(editor).id();
 
-    let kernel = match editor.jupyter.start_client("helix-test") {
+    let kernel = match editor.jupyter.start_client_blocking("helix-test") {
         Ok(kernel) => kernel,
         Err(err) => {
             eprintln!("skipping jupyter test, `helix-test` kernel unavailable: {err}");
@@ -103,7 +150,7 @@ async fn jupyter_variable_introspection() -> anyhow::Result<()> {
     use helix_jupyter::registry::Registry;
 
     let mut registry = Registry::new();
-    let kernel = match registry.start_client("helix-test") {
+    let kernel = match registry.start_client_blocking("helix-test") {
         Ok(kernel) => kernel,
         Err(err) => {
             eprintln!("skipping jupyter test, `helix-test` kernel unavailable: {err}");

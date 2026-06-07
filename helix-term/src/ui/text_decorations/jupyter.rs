@@ -107,8 +107,15 @@ impl Decoration for JupyterOutputs<'_> {
                     ImagePlacement::Fallback => {
                         let label = format!("[image {}×{}]", image.width_px, image.height_px);
                         let style = self.styles.style(OutputKind::Result);
-                        renderer
-                            .set_string_truncated(x, row, &label, width, |_| style, true, false);
+                        renderer.set_string_truncated(
+                            x,
+                            row,
+                            &label,
+                            width,
+                            |_| style,
+                            true,
+                            false,
+                        );
                         row += 1;
                     }
                     ImagePlacement::Pending => {}

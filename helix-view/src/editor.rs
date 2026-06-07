@@ -1258,6 +1258,9 @@ pub struct Editor {
     /// kitty image ids whose placements should be deleted from the terminal on
     /// the next render (their output blocks were replaced or cleared).
     pub jupyter_pending_image_deletions: Vec<u32>,
+    /// Evaluations deferred while their document's kernel is still starting,
+    /// replayed once the kernel is `Ready` (see `commands::jupyter`).
+    pub jupyter_pending_evals: Vec<crate::jupyter::PendingEval>,
 
     pub syn_loader: Arc<ArcSwap<syntax::Loader>>,
     pub theme_loader: Arc<theme::Loader>,
@@ -1317,6 +1320,8 @@ pub enum EditorEvent {
     LanguageServerMessage((LanguageServerId, Call)),
     DebuggerEvent((DebugAdapterId, dap::Payload)),
     JupyterEvent((KernelId, jupyter::Payload)),
+    /// A background `:jupyter-start` finished (the kernel connected or failed).
+    JupyterKernelStarted(jupyter::KernelStart),
     IdleTimer,
     Redraw,
 }
@@ -1408,6 +1413,7 @@ impl Editor {
             jupyter: jupyter::registry::Registry::new(),
             jupyter_next_image_id: 1,
             jupyter_pending_image_deletions: Vec::new(),
+            jupyter_pending_evals: Vec::new(),
             breakpoints: HashMap::new(),
             syn_loader,
             theme_loader,
@@ -2469,6 +2475,9 @@ impl Editor {
                 }
                 Some(event) = self.jupyter.incoming.next() => {
                     return EditorEvent::JupyterEvent(event)
+                }
+                Some(start) = self.jupyter.start_rx.recv() => {
+                    return EditorEvent::JupyterKernelStarted(start)
                 }
 
                 _ = helix_event::redraw_requested() => {

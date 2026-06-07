@@ -15,7 +15,7 @@ async fn main() -> anyhow::Result<()> {
     eprintln!("starting kernel {kernel_name}...");
 
     let mut registry = Registry::new();
-    let id = registry.start_client(&kernel_name)?;
+    let id = registry.start_client_blocking(&kernel_name)?;
     eprintln!("kernel started: {id}");
 
     let exec1 = registry

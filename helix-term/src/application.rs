@@ -103,6 +103,10 @@ pub struct Application {
     signals: Signals,
     jobs: Jobs,
     lsp_progress: LspProgressMap,
+    /// Last-rendered scroll position of each view, used to drop inline Jupyter
+    /// images when the view scrolls (see [`Application::clear_jupyter_images_on_scroll`]).
+    jupyter_view_offsets:
+        std::collections::HashMap<helix_view::ViewId, helix_view::view::ViewPosition>,
 
     theme_mode: Option<theme::Mode>,
 }
@@ -285,6 +289,7 @@ impl Application {
             signals,
             jobs,
             lsp_progress: LspProgressMap::new(),
+            jupyter_view_offsets: std::collections::HashMap::new(),
             theme_mode,
         };
 
@@ -297,6 +302,7 @@ impl Application {
             self.compositor.full_redraw = false;
         }
 
+        self.clear_jupyter_images_on_scroll();
         self.sync_jupyter_images();
 
         let mut cx = crate::compositor::Context {
@@ -326,6 +332,33 @@ impl Application {
         self.terminal.draw(pos, kind).unwrap();
     }
 
+    /// Drop inline Jupyter images whenever a view's scroll position changed since
+    /// the last render. Inline graphics are anchored to placeholder cells in the
+    /// text grid; when the view scrolls the terminal bitmap and the text desync.
+    /// `scroll` clears them for explicit scrolling, but the view also moves
+    /// implicitly — e.g. when an edit pushes the cursor and `ensure_cursor_in_view`
+    /// shifts the viewport — so we detect any offset change centrally here.
+    fn clear_jupyter_images_on_scroll(&mut self) {
+        let mut scrolled = false;
+        let mut offsets = std::collections::HashMap::with_capacity(self.jupyter_view_offsets.len());
+        for (view, _focused) in self.editor.tree.views() {
+            let Some(doc) = self.editor.documents.get(&view.doc) else {
+                continue;
+            };
+            let offset = doc.view_offset(view.id);
+            // A change (or a newly-seen view) means the grid moved under the images.
+            if self.jupyter_view_offsets.get(&view.id) != Some(&offset) {
+                scrolled = true;
+            }
+            offsets.insert(view.id, offset);
+        }
+        self.jupyter_view_offsets = offsets;
+
+        if scrolled {
+            self.editor.clear_jupyter_images();
+        }
+    }
+
     /// Resolve inline Jupyter image placements, transmit any new images to the
     /// terminal, and delete images whose output blocks were replaced or cleared.
     /// Runs before each render so placements are known when the layout is built.
@@ -333,8 +366,7 @@ impl Application {
         use helix_view::jupyter::ImagePlacement;
 
         let backend = self.terminal.backend();
-        let supported =
-            backend.supports_graphics() && self.editor.config().jupyter.inline_images;
+        let supported = backend.supports_graphics() && self.editor.config().jupyter.inline_images;
         let cell_size = backend.cell_pixel_size();
         let max_cols = self.terminal.size().width.saturating_sub(8).max(1);
 
@@ -763,6 +795,10 @@ impl Application {
                 if needs_render {
                     self.render().await;
                 }
+            }
+            EditorEvent::JupyterKernelStarted(start) => {
+                crate::commands::jupyter::on_kernel_started(&mut self.editor, start);
+                self.render().await;
             }
             EditorEvent::Redraw => {
                 self.render().await;

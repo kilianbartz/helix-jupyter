@@ -84,9 +84,15 @@ mod tests {
     #[test]
     fn placeholder_encodes_row_and_column() {
         // Index 0 maps to U+0305 (first rowcolumn diacritic).
-        assert_eq!(placeholder_cell(0, 0).unwrap(), "\u{10EEEE}\u{0305}\u{0305}");
+        assert_eq!(
+            placeholder_cell(0, 0).unwrap(),
+            "\u{10EEEE}\u{0305}\u{0305}"
+        );
         // Index 1 maps to U+030D.
-        assert_eq!(placeholder_cell(1, 2).unwrap(), "\u{10EEEE}\u{030D}\u{030E}");
+        assert_eq!(
+            placeholder_cell(1, 2).unwrap(),
+            "\u{10EEEE}\u{030D}\u{030E}"
+        );
     }
 
     #[test]

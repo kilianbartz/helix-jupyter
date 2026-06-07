@@ -1939,11 +1939,9 @@ fn switch_to_lowercase(cx: &mut Context) {
 
 pub fn scroll(cx: &mut Context, offset: usize, direction: Direction, sync_cursor: bool) {
     use Direction::*;
-    // Inline Jupyter images can't be kept in sync with the scrolling text grid,
-    // so clear them as soon as the view scrolls.
-    if cx.editor.clear_jupyter_images() {
-        helix_event::request_redraw();
-    }
+    // Inline Jupyter images can't be kept in sync with the scrolling text grid;
+    // they are dropped centrally on any view-offset change (see
+    // `Application::clear_jupyter_images_on_scroll`), which covers this scroll too.
     let config = cx.editor.config();
     let (view, doc) = current!(cx.editor);
     let mut view_offset = doc.view_offset(view.id);

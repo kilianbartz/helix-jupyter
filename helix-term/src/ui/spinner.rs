@@ -51,6 +51,17 @@ impl Spinner {
         Self::new(vec!["⣾", "⣽", "⣻", "⢿", "⡿", "⣟", "⣯", "⣷"], interval)
     }
 
+    /// The dots frame for an animation that began at `start`, without keeping a
+    /// `Spinner` instance. Used for one-off progress like Jupyter kernel startup,
+    /// where the spinner state lives elsewhere (the kernel's start time).
+    pub fn dots_frame_at(start: Instant) -> &'static str {
+        const FRAMES: [&str; 8] = ["⣾", "⣽", "⣻", "⢿", "⡿", "⣟", "⣯", "⣷"];
+        const INTERVAL_MS: u128 = 80;
+        let idx = (Instant::now().duration_since(start).as_millis() / INTERVAL_MS) as usize
+            % FRAMES.len();
+        FRAMES[idx]
+    }
+
     pub fn start(&mut self) {
         self.start = Some(Instant::now());
     }

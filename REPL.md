@@ -169,6 +169,19 @@ All commands are available on the command line (`:`) and also as bindable
 
 ## Features in detail
 
+### Starting a kernel (non-blocking)
+
+Kernels start **in the background** — the editor stays fully responsive while a
+kernel boots (which can take a few seconds). While it starts, the status line
+shows a spinner and `Starting <kernel>…`, and the message turns into
+`Started <kernel>` once it is ready (or an error if it fails).
+
+This applies to `:jupyter-start`, `:jupyter-kernel-select`, `:jupyter-restart`,
+and the auto-start triggered by `:jupyter-eval`. If you run `:jupyter-eval`
+before a kernel is ready (including the auto-start case), the evaluation is
+**queued** and runs automatically as soon as the kernel connects — you don't
+need to run it again.
+
 ### Evaluating code
 
 `:jupyter-eval` evaluates **whole lines**: every line that your selection
