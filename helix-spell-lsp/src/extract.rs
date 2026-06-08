@@ -13,11 +13,18 @@ use tree_sitter_language::LanguageFn;
 
 extern "C" {
     fn tree_sitter_latex() -> *const ();
+    fn tree_sitter_typst() -> *const ();
 }
 
 /// The LaTeX grammar, compiled from C sources by `build.rs`.
 fn latex_language() -> TsLanguage {
     let f: LanguageFn = unsafe { LanguageFn::from_raw(tree_sitter_latex) };
+    f.into()
+}
+
+/// The Typst grammar, compiled from C sources by `build.rs`.
+fn typst_language() -> TsLanguage {
+    let f: LanguageFn = unsafe { LanguageFn::from_raw(tree_sitter_typst) };
     f.into()
 }
 
@@ -34,6 +41,7 @@ pub struct Word {
 pub enum Language {
     Latex,
     Markdown,
+    Typst,
 }
 
 impl Language {
@@ -49,6 +57,7 @@ impl Language {
             }
             "md" | "markdown" | "mdx" | "mkd" | "mkdn" | "mdwn" | "mdown" | "markdn" | "mdtxt"
             | "mdtext" | "livemd" => Some(Language::Markdown),
+            "typ" | "typst" => Some(Language::Typst),
             _ => None,
         }
     }
@@ -166,6 +175,7 @@ pub fn extract(language: Language, text: &str, skip_acronyms: bool) -> Vec<Word>
     let skip = match language {
         Language::Latex => latex_skip_ranges(text),
         Language::Markdown => markdown_skip_ranges(text),
+        Language::Typst => typst_skip_ranges(text),
     };
     let merged = merge_ranges(skip);
     tokenize(text, &merged, skip_acronyms)
@@ -225,6 +235,63 @@ fn markdown_skip_ranges(text: &str) -> Vec<(usize, usize)> {
     collect_skip(tree.block_tree().root_node(), MARKDOWN_SKIP, &mut out);
     for inline in tree.inline_trees() {
         collect_skip(inline.root_node(), MARKDOWN_SKIP, &mut out);
+    }
+    out
+}
+
+/// Typst inverts the usual strategy: prose lives exclusively in `text` nodes
+/// (markup mode), while code, math, raw blocks, references, labels, URLs and
+/// strings use other node kinds — and code blocks can embed markup `content`
+/// (`#figure(caption: [prose])`), so a skip-list of code subtrees would wrongly
+/// drop that prose. Instead we collect the byte ranges of `text` nodes as an
+/// *include* list and skip everything else (the complement). The Typst grammar's
+/// `text` rule spans whole prose runs — apostrophes and other punctuation
+/// included — so contractions like `don't` survive as a single token.
+fn typst_skip_ranges(text: &str) -> Vec<(usize, usize)> {
+    let mut parser = Parser::new();
+    if parser.set_language(&typst_language()).is_err() {
+        return Vec::new();
+    }
+    let Some(tree) = parser.parse(text, None) else {
+        return Vec::new();
+    };
+    let mut include = Vec::new();
+    // `quote` is the markup smart-quote node (a lone `'` or `"`). Including it
+    // lets an apostrophe between two `text` nodes merge them back together, so
+    // contractions like `don't` survive as a single token.
+    collect_kind(tree.root_node(), TYPST_PROSE, &mut include);
+    complement_ranges(&merge_ranges(include), text.len())
+}
+
+/// Typst node kinds that carry (or glue together) prose. See [`typst_skip_ranges`].
+const TYPST_PROSE: &[&str] = &["text", "quote"];
+
+/// Recursively record the byte range of every node whose kind is in `kinds`.
+/// Matched nodes are not descended into — their range already covers children.
+fn collect_kind(node: Node, kinds: &[&str], out: &mut Vec<(usize, usize)>) {
+    if kinds.contains(&node.kind()) {
+        out.push((node.start_byte(), node.end_byte()));
+        return;
+    }
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        collect_kind(child, kinds, out);
+    }
+}
+
+/// The complement of a sorted, disjoint `include` list within `[0, total)`:
+/// every byte range *not* covered by an include range.
+fn complement_ranges(include: &[(usize, usize)], total: usize) -> Vec<(usize, usize)> {
+    let mut out = Vec::new();
+    let mut pos = 0;
+    for &(s, e) in include {
+        if s > pos {
+            out.push((pos, s));
+        }
+        pos = pos.max(e);
+    }
+    if pos < total {
+        out.push((pos, total));
     }
     out
 }
@@ -419,6 +486,47 @@ mod tests {
         assert!(!has(&words, "wrongurl"));
         assert!(!has(&words, "auto"));
         assert!(!has(&words, "http"));
+    }
+
+    #[test]
+    fn typst_skips_code_math_and_refs() {
+        let src = r#"= Headingg
+
+Some prose with a typoo and a contraction don't here.
+
+#let myvariabel = 42
+#set text(font: "Arial")
+
+Inline `code_wrong` and a $ x_wrongg $ formula.
+
+A #link("https://wrongurl.example")[visible linkk] and a @badref reference.
+
+// a commentt line
+
+A figure with #figure(caption: [a captionn typo]).
+
+```rust
+let wrongg = 1;
+```
+"#;
+        let words = words_of(Language::Typst, src);
+        assert!(has(&words, "Headingg"));
+        assert!(has(&words, "prose"));
+        assert!(has(&words, "typoo"));
+        assert!(has(&words, "don't"));
+        assert!(has(&words, "visible"));
+        assert!(has(&words, "linkk"));
+        // markup embedded in a code call argument is still checked:
+        assert!(has(&words, "captionn"));
+        // code identifiers, strings, math, raw, refs, comments are excluded:
+        assert!(!has(&words, "myvariabel"));
+        assert!(!has(&words, "Arial"));
+        assert!(!has(&words, "code_wrong"));
+        assert!(!has(&words, "wrongg"));
+        assert!(!has(&words, "wrongurl"));
+        assert!(!has(&words, "badref"));
+        assert!(!has(&words, "commentt"));
+        assert!(!has(&words, "font"));
     }
 
     #[test]

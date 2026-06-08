@@ -65,7 +65,7 @@ hare-lsp = { command = "hare-lsp", args = ["-S"] }
 harper-ls = { command = "harper-ls", args = ["--stdio"] }
 haskell-language-server = { command = "haskell-language-server-wrapper", args = ["--lsp"] }
 hdls = { command = "hdls" }
-# Spell-checking server for LaTeX and Markdown — see SPELL.md and helix-spell-lsp/.
+# Spell-checking server for LaTeX, Markdown and Typst — see SPELL.md and helix-spell-lsp/.
 helix-spell = { command = "helix-spell-lsp" }
 hyprls = { command = "hyprls" }
 hyuga = { command = "hyuga" }
@@ -3912,7 +3912,7 @@ injection-regex = "typ(st)?"
 file-types = ["typst", "typ"]
 comment-token = "//"
 block-comment-tokens = { start = "/*", end = "*/" }
-language-servers = ["tinymist"]
+language-servers = ["tinymist", { name = "helix-spell", only-features = ["diagnostics", "code-action"] }]
 indent = { tab-width = 2, unit = "  " }
 
 [language.auto-pairs]

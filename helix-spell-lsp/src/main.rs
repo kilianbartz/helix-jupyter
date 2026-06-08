@@ -1,5 +1,5 @@
 //! `helix-spell-lsp` — a tree-sitter-aware spell-checking language server for
-//! LaTeX and Markdown. Communicates over stdio. See `SPELL.md` for usage.
+//! LaTeX, Markdown and Typst. Communicates over stdio. See `SPELL.md` for usage.
 
 mod backend;
 mod config;

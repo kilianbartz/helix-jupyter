@@ -1,10 +1,10 @@
 # Spell checking
 
 This fork ships **`helix-spell-lsp`**, a small language server that spell-checks
-**LaTeX and Markdown** prose. It is tree-sitter aware: it checks the words you
-actually wrote and leaves `\commands`, math, code, links, and URLs alone. Unknown
-words are reported as diagnostics, and code actions let you fix a typo or teach
-the dictionary a new word.
+**LaTeX, Markdown and Typst** prose. It is tree-sitter aware: it checks the words
+you actually wrote and leaves `\commands`, math, code, links, and URLs alone.
+Unknown words are reported as diagnostics, and code actions let you fix a typo or
+teach the dictionary a new word.
 
 ```text
 \section{Introduktion}          ← "Introduktion" flagged
@@ -25,11 +25,13 @@ editor through `languages.toml` like any other language server — there are no 
   distributions install `hunspell-en_US` (or `hunspell-en`). Any Hunspell
   `.aff`/`.dic` pair works; see [Configuration](#configuration) to choose another.
 - **The `helix-spell-lsp` binary on `PATH`** (see [Building](#building)).
-- **The LaTeX grammar source**, used to compile the server. It is vendored under
-  the repo's `runtime/grammars/sources/latex` (populated by the grammar fetch
-  step). If you have already built the editor's grammars you have it; otherwise run
-  `hx --grammar fetch` (or `cargo run -- --grammar fetch`) from the repo root, or
-  point `HELIX_SPELL_LATEX_SRC` at a `tree-sitter-latex` checkout's `src` directory.
+- **The LaTeX and Typst grammar sources**, used to compile the server. They are
+  vendored under the repo's `runtime/grammars/sources/{latex,typst}` (populated by
+  the grammar fetch step). If you have already built the editor's grammars you have
+  them; otherwise run `hx --grammar fetch` (or `cargo run -- --grammar fetch`) from
+  the repo root, or point `HELIX_SPELL_LATEX_SRC` / `HELIX_SPELL_TYPST_SRC` at a
+  grammar checkout's `src` directory (each containing `parser.c` and `scanner.c`).
+  (Markdown uses the published `tree-sitter-md` crate and needs no vendored source.)
 
 ## Building
 
@@ -59,6 +61,12 @@ The server parses each document with tree-sitter and only spell-checks prose:
 - **Markdown** — fenced and indented code blocks, inline code spans, link/image
   destinations, autolinks, raw HTML, and YAML/TOML frontmatter are skipped. Heading
   text, emphasis, and link *text* are checked.
+- **Typst** — only markup prose is checked. Code mode (`#let`, `#set`, `#show`,
+  function calls, identifiers, strings, numbers), math (`$…$`), raw spans and
+  blocks (`` `…` ``, ```` ```…``` ````), comments, labels (`<…>`), references
+  (`@…`), and URLs are all skipped. Heading text, `*strong*`/`_emph_` bodies, list
+  and term items, and markup *content* passed to functions
+  (e.g. `#figure(caption: [checked prose])`) are checked.
 
 Words containing digits (`h2o`, `3rd`) are ignored, and all-caps acronyms
 (`NASA`, `HTTP`) are ignored by default (configurable).
@@ -110,9 +118,9 @@ config = { dictionary = "en_US", project-dict-file = ".spell.dic", severity = "i
 | `ignore-uppercase`  | `true`        | Skip all-caps acronyms.                                            |
 | `max-suggestions`   | `5`           | Max replacement suggestions offered per misspelling.               |
 
-The server is registered for LaTeX and Markdown with
+The server is registered for LaTeX, Markdown and Typst with
 `only-features = ["diagnostics", "code-action"]`, so it never competes with
-`texlab`/`marksman` for completion, formatting, or navigation.
+`texlab`/`marksman`/`tinymist` for completion, formatting, or navigation.
 
 ## Limitations
 

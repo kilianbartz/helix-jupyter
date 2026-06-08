@@ -4,7 +4,7 @@ use helix_core::syntax::config::LanguageServerFeature;
 
 use crate::{
     editor::GutterType,
-    graphics::{Style, UnderlineStyle},
+    graphics::{Color, Style, UnderlineStyle},
     Document, Editor, Theme, View,
 };
 
@@ -137,6 +137,35 @@ pub fn diff<'doc>(
     } else {
         Box::new(move |_, _, _, _| None)
     }
+}
+
+/// Marks the signature line of every closed fold with a diamond in the gutter.
+fn fold<'doc>(
+    _editor: &'doc Editor,
+    doc: &'doc Document,
+    theme: &Theme,
+) -> GutterFn<'doc> {
+    // Default to a white diamond; the `ui.gutter.fold` scope (falling back to
+    // `ui.virtual.fold`, the `…` marker color) lets themes override it.
+    let mut style = theme.get("ui.gutter.fold");
+    if style == Style::default() {
+        style = theme.get("ui.virtual.fold");
+    }
+    if style.fg.is_none() {
+        style = style.fg(Color::White);
+    }
+
+    Box::new(
+        move |line: usize, _selected: bool, first_visual_line: bool, out: &mut String| {
+            if !first_visual_line {
+                return None;
+            }
+            doc.fold_index_at_line(line).map(|_| {
+                write!(out, "◆").unwrap();
+                style
+            })
+        },
+    )
 }
 
 pub fn line_numbers<'doc>(
@@ -317,11 +346,13 @@ pub fn diagnostics_or_breakpoints<'doc>(
     let mut diagnostics = diagnostic(editor, doc, view, theme, is_focused);
     let mut breakpoints = breakpoints(editor, doc, view, theme, is_focused);
     let mut execution_pause_indicator = execution_pause_indicator(editor, doc, theme, is_focused);
+    let mut fold = fold(editor, doc, theme);
 
     Box::new(move |line, selected, first_visual_line: bool, out| {
         execution_pause_indicator(line, selected, first_visual_line, out)
             .or_else(|| breakpoints(line, selected, first_visual_line, out))
             .or_else(|| diagnostics(line, selected, first_visual_line, out))
+            .or_else(|| fold(line, selected, first_visual_line, out))
     })
 }
 

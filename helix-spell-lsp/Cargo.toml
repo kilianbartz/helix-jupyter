@@ -10,7 +10,7 @@ name = "helix-spell-lsp"
 version = "0.1.0"
 edition = "2021"
 license = "MPL-2.0"
-description = "Tree-sitter-aware spell-checking language server for LaTeX and Markdown"
+description = "Tree-sitter-aware spell-checking language server for LaTeX, Markdown and Typst"
 
 [[bin]]
 name = "helix-spell-lsp"

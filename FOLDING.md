@@ -57,6 +57,17 @@ if unset). The signature line is always underlined; if `ui.virtual.fold` sets an
 "ui.virtual.fold" = { fg = "gray", underline_color = "gray" }
 ```
 
+Closed folds are also marked in the gutter with a `◆` diamond on the signature
+line. The marker shares the existing `diagnostics` gutter column (so it adds no
+width); it shows only when that line has no higher-priority marker
+(execution-pause indicator, breakpoint, or diagnostic). The diamond uses the
+`ui.gutter.fold` scope, falling back to `ui.virtual.fold` and finally to a white
+diamond if neither is themed:
+
+```toml
+"ui.gutter.fold" = { fg = "#c9a0ff" }   # light purple diamond
+```
+
 ## Behavior and limitations
 
 - Folding operates on whole lines: the first (signature) line of the block stays
