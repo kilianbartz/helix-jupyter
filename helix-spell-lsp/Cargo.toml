@@ -1,0 +1,37 @@
+# Standalone crate — intentionally detached from the parent Helix workspace.
+# The empty [workspace] table below stops cargo from treating this as a member
+# of the Helix workspace (it is not listed in the root Cargo.toml `members`),
+# which keeps its zspell/tree-sitter deps and C-grammar builds out of the
+# editor's build.
+[workspace]
+
+[package]
+name = "helix-spell-lsp"
+version = "0.1.0"
+edition = "2021"
+license = "MPL-2.0"
+description = "Tree-sitter-aware spell-checking language server for LaTeX and Markdown"
+
+[[bin]]
+name = "helix-spell-lsp"
+path = "src/main.rs"
+
+[dependencies]
+tower-lsp = "0.20"
+tokio = { version = "1", features = ["full"] }
+zspell = { version = "0.5", features = ["unstable-suggestions"] }
+tree-sitter = "0.26"
+tree-sitter-language = "0.1"
+tree-sitter-md = { version = "0.5", features = ["parser"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+dirs = "6"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# The published `tree-sitter-latex` crate (0.1.0) ships a `parser.c` that
+# references an external scanner but omits `scanner.c`, so it fails to link.
+# Instead we compile the grammar's C sources directly (see build.rs), reusing
+# the complete grammar already vendored in this repo's `runtime/grammars`.
+[build-dependencies]
+cc = "1"
