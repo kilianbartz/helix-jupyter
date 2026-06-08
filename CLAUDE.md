@@ -8,6 +8,8 @@ This is a fork of the [Helix editor](https://github.com/helix-editor/helix) (`or
 
 `REPL.md` is the user-facing documentation for the Jupyter feature and is the authoritative spec for its behavior, commands, config keys, and limitations. Read it before changing REPL behavior.
 
+`LATEX.md` is the user-facing documentation for the LaTeX section-navigation feature (section jumps, `@section.around` captures, `goto_next/prev_section` commands). Read it before changing LaTeX textobject queries or the section-jump commands.
+
 ## Build, test, run
 
 The toolchain is pinned in `rust-toolchain.toml` (Rust 1.90.0, the project's MSRV). `default-members` is `helix-term`, so plain cargo commands target the editor binary `hx`.
