@@ -586,6 +586,10 @@ impl MappableCommand {
         goto_prev_entry, "Goto previous pairing",
         goto_next_paragraph, "Goto next paragraph",
         goto_prev_paragraph, "Goto previous paragraph",
+        goto_next_section, "Select next section (LaTeX outline)",
+        goto_prev_section, "Select previous section (LaTeX outline)",
+        goto_next_function_collapsed, "Goto next function (collapsed)",
+        goto_prev_function_collapsed, "Goto previous function (collapsed)",
         dap_launch, "Launch debug target",
         dap_restart, "Restart debugging session",
         dap_toggle_breakpoint, "Toggle breakpoint",
@@ -6387,6 +6391,25 @@ fn goto_next_entry(cx: &mut Context) {
 
 fn goto_prev_entry(cx: &mut Context) {
     goto_ts_object_impl(cx, "entry", Direction::Backward)
+}
+
+fn goto_next_section(cx: &mut Context) {
+    goto_ts_object_impl(cx, "section", Direction::Forward)
+}
+
+fn goto_prev_section(cx: &mut Context) {
+    goto_ts_object_impl(cx, "section", Direction::Backward)
+}
+
+fn goto_next_function_collapsed(cx: &mut Context) {
+    goto_next_function(cx);
+    flip_selections(cx);
+    collapse_selection(cx);
+}
+
+fn goto_prev_function_collapsed(cx: &mut Context) {
+    goto_prev_function(cx);
+    collapse_selection(cx);
 }
 
 fn select_textobject_around(cx: &mut Context) {

@@ -15,6 +15,8 @@ pub fn default() -> HashMap<Mode, KeyTrie> {
         "f" => find_next_char,
         "T" => till_prev_char,
         "F" => find_prev_char,
+        "ü" => goto_next_function_collapsed,
+        "Ü" => goto_prev_function_collapsed,
         "r" => replace,
         "R" => replace_with_yanked,
         "A-." =>  repeat_last_motion,
@@ -310,6 +312,9 @@ pub fn default() -> HashMap<Mode, KeyTrie> {
             "o" => fold_open,
             "M" => fold_all,
             "R" => unfold_all,
+
+            "s" => goto_next_section,
+            "S" => goto_prev_section,
 
             "/" => search,
             "?" => rsearch,
