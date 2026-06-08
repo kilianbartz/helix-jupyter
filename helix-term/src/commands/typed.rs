@@ -106,6 +106,51 @@ fn force_exit(cx: &mut compositor::Context, args: Args, event: PromptEvent) -> a
     quit(cx, Args::default(), event)
 }
 
+/// Snapshot folds, show "Saving folds…" in the status bar, flush the folds
+/// file asynchronously (via `spawn_blocking`), then call `on_done` on the
+/// editor when the I/O completes. Redraws are nudged every 80 ms while the
+/// background write is in flight so the status message stays visible on slow
+/// file systems.
+fn save_folds_then<F>(cx: &mut compositor::Context, on_done: F)
+where
+    F: FnOnce(&mut Editor) + Send + 'static,
+{
+    use crate::handlers::folds;
+    use crate::job::Callback;
+    use std::sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    };
+    use std::time::Duration;
+
+    let snapshots = folds::snapshot_folds(cx.editor);
+    cx.editor.set_status("Saving folds…");
+
+    // Nudge redraws until the background write completes so the status
+    // message stays visible on network/slow file systems.
+    let done = Arc::new(AtomicBool::new(false));
+    let done_flag = done.clone();
+    tokio::spawn(async move {
+        while !done_flag.load(Ordering::Relaxed) {
+            tokio::time::sleep(Duration::from_millis(80)).await;
+            helix_event::request_redraw();
+        }
+    });
+
+    cx.jobs.callback(async move {
+        let result = tokio::task::spawn_blocking(move || folds::flush_folds_to_disk(snapshots))
+            .await
+            .expect("spawn_blocking panicked");
+        done.store(true, Ordering::Relaxed);
+        Ok(Callback::Editor(Box::new(move |editor| {
+            if let Err(err) = result {
+                log::warn!("Failed to save folds: {err}");
+            }
+            on_done(editor);
+        })))
+    });
+}
+
 fn quit(cx: &mut compositor::Context, _args: Args, event: PromptEvent) -> anyhow::Result<()> {
     log::debug!("quitting...");
 
@@ -119,7 +164,8 @@ fn quit(cx: &mut compositor::Context, _args: Args, event: PromptEvent) -> anyhow
     }
 
     cx.block_try_flush_writes()?;
-    cx.editor.close(view!(cx.editor).id);
+    let view_id = view!(cx.editor).id;
+    save_folds_then(cx, move |editor| editor.close(view_id));
 
     Ok(())
 }
@@ -130,7 +176,8 @@ fn force_quit(cx: &mut compositor::Context, _args: Args, event: PromptEvent) -> 
     }
 
     cx.block_try_flush_writes()?;
-    cx.editor.close(view!(cx.editor).id);
+    let view_id = view!(cx.editor).id;
+    save_folds_then(cx, move |editor| editor.close(view_id));
 
     Ok(())
 }
@@ -964,11 +1011,12 @@ fn quit_all_impl(cx: &mut compositor::Context, force: bool) -> anyhow::Result<()
         buffers_remaining_impl(cx.editor)?;
     }
 
-    // close all views
-    let views: Vec<_> = cx.editor.tree.views().map(|(view, _)| view.id).collect();
-    for view_id in views {
-        cx.editor.close(view_id);
-    }
+    save_folds_then(cx, |editor| {
+        let views: Vec<_> = editor.tree.views().map(|(view, _)| view.id).collect();
+        for view_id in views {
+            editor.close(view_id);
+        }
+    });
 
     Ok(())
 }

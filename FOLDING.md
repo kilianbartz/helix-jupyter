@@ -66,5 +66,9 @@ if unset). The signature line is always underlined; if `ui.virtual.fold` sets an
 - Vertical cursor movement, scrolling, and the line-number gutter all skip folded
   lines. Horizontal movement (`h`/`l`) and `goto`/search into a concealed line do
   not auto-unfold; use `:unfold` / `zo` to reveal it.
-- Folds are per-document and are not persisted across editor sessions.
+- Folds are persisted across sessions in `.helix/folds.toml` at the workspace
+  root (the directory that contains `.git`, `.svn`, `.jj`, or `.helix`). Folds
+  are restored automatically when a file is opened. If no workspace root is
+  found the current working directory is used and `.helix/folds.toml` is
+  written there.
 - Blocks with multi-line signatures collapse onto their first line only.

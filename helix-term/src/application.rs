@@ -414,7 +414,9 @@ impl Application {
                 }
                 Some(callback) = self.jobs.callbacks.recv() => {
                     self.jobs.handle_callback(&mut self.editor, &mut self.compositor, Ok(Some(callback)));
-                    self.render().await;
+                    if !self.editor.should_close() {
+                        self.render().await;
+                    }
                 }
                 Some(msg) = self.jobs.status_messages.recv() => {
                     let severity = match msg.severity{
@@ -429,7 +431,9 @@ impl Application {
                 }
                 Some(callback) = self.jobs.wait_futures.next() => {
                     self.jobs.handle_callback(&mut self.editor, &mut self.compositor, callback);
-                    self.render().await;
+                    if !self.editor.should_close() {
+                        self.render().await;
+                    }
                 }
                 event = self.editor.wait_event() => {
                     let _idle_handled = self.handle_editor_event(event).await;
