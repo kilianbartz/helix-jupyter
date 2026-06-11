@@ -67,6 +67,8 @@ haskell-language-server = { command = "haskell-language-server-wrapper", args = 
 hdls = { command = "hdls" }
 # Spell-checking server for LaTeX, Markdown and Typst — see SPELL.md and helix-spell-lsp/.
 helix-spell = { command = "helix-spell-lsp" }
+# LLM grammar/style checker and rephraser — see STYLE.md and helix-style-lsp/.
+helix-style = { command = "helix-style-lsp" }
 hyprls = { command = "hyprls" }
 hyuga = { command = "hyuga" }
 idris2-lsp = { command = "idris2-lsp" }
@@ -1397,7 +1399,7 @@ scope = "source.tex"
 injection-regex = "tex"
 file-types = ["tex", "dtx", "ins", "sty", "cls", "Rd", "bbx", "cbx"]
 comment-token = "%"
-language-servers = [ "texlab", { name = "helix-spell", only-features = ["diagnostics", "code-action"] } ]
+language-servers = [ "texlab", { name = "helix-spell", only-features = ["diagnostics", "code-action"] }, { name = "helix-style", only-features = ["diagnostics", "code-action"] } ]
 indent = { tab-width = 4, unit = "\t" }
 
 [[grammar]]
@@ -2087,7 +2089,7 @@ scope = "source.md"
 injection-regex = "md|markdown"
 file-types = ["md", "livemd", "markdown", "mdx", "mkd", "mkdn", "mdwn", "mdown", "markdn", "mdtxt", "mdtext", "workbook", { glob = "PULLREQ_EDITMSG" }]
 roots = [".marksman.toml"]
-language-servers = [ "marksman", "markdown-oxide", "rumdl", { name = "helix-spell", only-features = ["diagnostics", "code-action"] } ]
+language-servers = [ "marksman", "markdown-oxide", "rumdl", { name = "helix-spell", only-features = ["diagnostics", "code-action"] }, { name = "helix-style", only-features = ["diagnostics", "code-action"] } ]
 indent = { tab-width = 2, unit = "  " }
 block-comment-tokens = { start = "<!--", end = "-->" }
 word-completion.trigger-length = 4
@@ -3912,7 +3914,7 @@ injection-regex = "typ(st)?"
 file-types = ["typst", "typ"]
 comment-token = "//"
 block-comment-tokens = { start = "/*", end = "*/" }
-language-servers = ["tinymist", { name = "helix-spell", only-features = ["diagnostics", "code-action"] }]
+language-servers = ["tinymist", { name = "helix-spell", only-features = ["diagnostics", "code-action"] }, { name = "helix-style", only-features = ["diagnostics", "code-action"] }]
 indent = { tab-width = 2, unit = "  " }
 
 [language.auto-pairs]

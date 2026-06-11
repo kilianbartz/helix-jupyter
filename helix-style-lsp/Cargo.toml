@@ -1,0 +1,27 @@
+# Standalone crate — intentionally detached from the parent Helix workspace.
+# The empty [workspace] table below stops cargo from treating this as a member
+# of the Helix workspace (it is not listed in the root Cargo.toml `members`),
+# which keeps its async HTTP/LLM dependencies out of the editor's build.
+[workspace]
+
+[package]
+name = "helix-style-lsp"
+version = "0.1.0"
+edition = "2021"
+license = "MPL-2.0"
+description = "LLM-backed grammar/style-checking and rephrasing language server (OpenAI-compatible)"
+
+[[bin]]
+name = "helix-style-lsp"
+path = "src/main.rs"
+
+[dependencies]
+tower-lsp = "0.20"
+tokio = { version = "1", features = ["full"] }
+# rustls so the crate links without a system OpenSSL; "json" pulls serde_json.
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+toml = "0.9"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
