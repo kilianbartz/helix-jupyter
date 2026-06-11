@@ -19,8 +19,17 @@
 ![Screenshot](./demo.png)
 
 A [Kakoune](https://github.com/mawww/kakoune) / [Neovim](https://github.com/neovim/neovim) inspired editor, written in Rust.
-Additionally, a REPL feature, inspired from [Zed](https://zed.dev/docs/repl) is implemented. Documentation for this can be found [here](./REPL.md).
-A tree-sitter based code folding feature is also implemented: collapse functions and classes to their signature line for easier navigation in large files, with keybindings in the `z` menu (`za` to toggle, `zM`/`zR` for fold/unfold all). Documentation can be found [here](./FOLDING.md).
+
+## Additional Features
+
+**Jupyter REPL** — Evaluate buffer selections in a persistent Jupyter kernel and render output inline, inspired by [Zed](https://zed.dev/docs/repl). Documentation [here](./REPL.md).
+
+**Jupyter Notebook Support** — Open and edit `.ipynb` files with full kernel integration. The buffer displays cells in percent-format with inline outputs from stored notebook execution. Documentation [here](./NOTEBOOK.md).
+
+**Code Folding** — Tree-sitter based code folding: collapse functions and classes to their signature line for easier navigation in large files. Keybindings in the `z` menu (`za` to toggle, `zM`/`zR` for fold/unfold all). Documentation [here](./FOLDING.md).
+
+**Spell Checking** — Multi-language spell checker with support for LaTeX, Markdown, and Typst. Run as a language server with quick-fix code actions and project dictionary support. Documentation [here](./SPELL.md).
+
 Note: The image displaying capabilities rely on [kitty's graphics protocol](https://sw.kovidgoyal.net/kitty/graphics-protocol/) and therefore only work in supported terminals.
 
 ---
