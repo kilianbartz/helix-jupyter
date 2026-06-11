@@ -8,6 +8,11 @@ Zed.
 Because the kernel stays alive between evaluations, state is preserved: define a
 variable in one selection and use it in the next without re-running anything.
 
+Jupyter **notebook files** (`.ipynb`) build on this feature: they open as
+editable percent-format buffers with their saved outputs rendered inline, and
+`# %%` cell markers enable cell-wise evaluation and navigation in any buffer.
+See [NOTEBOOK.md](NOTEBOOK.md).
+
 ---
 
 ## Table of contents
@@ -143,6 +148,7 @@ All commands are available on the command line (`:`) and also as bindable
 | `:jupyter-start [kernel]` (`jstart`) | —                       | Start a kernel for the current document. Uses `default-kernel` if no arg.    |
 | `:jupyter-kernel-select` (`jkernel`) | `jupyter_kernel_select` | Open a picker of installed kernelspecs and start the chosen one.             |
 | `:jupyter-eval` (`jeval`)          | `jupyter_eval`          | Evaluate the selected lines (or the current line) in the kernel.             |
+| `:jupyter-eval-cell` (`jcell`)     | `jupyter_eval_cell`     | Evaluate the `# %%` cell under the cursor (see [NOTEBOOK.md](NOTEBOOK.md)).  |
 | `:jupyter-variables` (`jvars`)     | `jupyter_variables`     | Show a popup of the variables touched by the last evaluation and their values. |
 | `:jupyter-restart`                 | `jupyter_restart`       | Restart the kernel (clears all state and output) and start it again.         |
 | `:jupyter-stop` (`jstop`)          | `jupyter_stop`          | Shut down the kernel and clear its output for this document.                 |

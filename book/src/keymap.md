@@ -376,6 +376,8 @@ These mappings are in the style of [vim-unimpaired](https://github.com/tpope/vim
 | `[G`     | Go to first change                           | `goto_first_change`     |
 | `[x`     | Go to next (X)HTML element                   | `goto_next_xml_element` |
 | `]x`     | Go to previous (X)HTML element               | `goto_prev_xml_element` |
+| `]j`     | Go to next notebook cell (`# %%`)            | `goto_next_cell`        |
+| `[j`     | Go to previous notebook cell (`# %%`)        | `goto_prev_cell`        |
 | `]Space` | Add newline below                            | `add_newline_below`     |
 | `[Space` | Add newline above                            | `add_newline_above`     |
 

@@ -162,7 +162,7 @@
 | koka | ✓ |  | ✓ |  |  | `koka` |
 | kotlin | ✓ | ✓ | ✓ | ✓ |  | `kotlin-language-server` |
 | koto | ✓ | ✓ | ✓ |  | ✓ | `koto-ls` |
-| latex | ✓ | ✓ | ✓ |  |  | `texlab` |
+| latex | ✓ | ✓ | ✓ |  |  | `texlab`, `helix-spell-lsp` |
 | ld | ✓ |  | ✓ |  |  |  |
 | ldif | ✓ |  |  |  |  |  |
 | lean | ✓ |  |  |  |  | `lake` |
@@ -180,7 +180,7 @@
 | mail | ✓ | ✓ |  |  | ✓ |  |
 | make | ✓ |  | ✓ |  |  |  |
 | markdoc | ✓ |  |  |  |  | `markdoc-ls` |
-| markdown | ✓ |  |  | ✓ |  | `marksman`, `markdown-oxide`, `rumdl` |
+| markdown | ✓ |  |  | ✓ |  | `marksman`, `markdown-oxide`, `rumdl`, `helix-spell-lsp` |
 | markdown-rustdoc | ✓ |  |  |  |  |  |
 | markdown.inline | ✓ |  |  |  |  |  |
 | matlab | ✓ | ✓ | ✓ |  |  |  |
@@ -305,7 +305,7 @@
 | twig | ✓ |  |  |  |  |  |
 | typescript | ✓ | ✓ | ✓ | ✓ | ✓ | `typescript-language-server` |
 | typespec | ✓ | ✓ | ✓ |  |  | `tsp-server` |
-| typst | ✓ | ✓ |  | ✓ |  | `tinymist` |
+| typst | ✓ | ✓ |  | ✓ |  | `tinymist`, `helix-spell-lsp` |
 | ungrammar | ✓ |  |  |  |  |  |
 | unison | ✓ | ✓ | ✓ | ✓ | ✓ |  |
 | uxntal | ✓ |  |  |  |  |  |

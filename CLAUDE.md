@@ -76,6 +76,26 @@ Key behavioral facts (see `REPL.md` for the rest):
 - Config lives under `[editor.jupyter]` (`enable`, `default-kernel`, `auto-start`, `inline-output`, `max-output-lines`, `inspect-variables`).
 - Theme scopes: `ui.virtual.jupyter.output` and `ui.virtual.jupyter.error`.
 
+## Notebook (`.ipynb`) feature architecture
+
+`NOTEBOOK.md` is the user-facing documentation for the notebook feature and is the authoritative spec for the percent format, cell matching, output semantics, and limitations.
+
+The feature is a load/save conversion layer plus cell-aware commands and rendering on top of the Jupyter REPL:
+
+**`helix-view/src/notebook.rs`** — the whole conversion core, editor-state-free except for `load_outputs`. `scan_cells` derives `CellSpan`s (code/markdown/raw) from `# %%` delimiter lines in any buffer; `parse_notebook`/`notebook_to_percent` convert nbformat JSON to percent-format text on open; `serialize_notebook`/`match_cells` patch buffer cell sources back into the retained JSON on save (two-pass matching: in-order exact + exact-anywhere for reorders, then positional between anchors; unmatched buffer cells become fresh cells, unmatched retained cells are dropped); `load_outputs` converts stored nbformat `outputs` into `JupyterOutput` blocks (execution ids prefixed `notebook:`) so the existing inline-output pipeline renders them; `outputs_to_json` writes re-executed cells' inline output back as nbformat outputs.
+
+**`helix-view/src/document.rs`** — `Document.notebook: Option<NotebookFile>` retains the parsed JSON; `cell_spans` is rescanned on every `apply`. Hooks: `open` (JSON→percent before `Document::from`), `save_impl` (percent→JSON `write_text` when the target path is `.ipynb`; the buffer rope still backs `DocumentSavedEvent`/LSP), `reload` (re-converts; bails on invalid JSON; drops the diff handle), `detect_language_config` (notebook language from `metadata.kernelspec.language`, fallback Python), `set_path` (drops notebook state when renamed away from `.ipynb`).
+
+**`helix-view/src/editor.rs` / `gutter.rs`** — `Editor::open` skips `set_diff_base` for notebook docs (deliberate: no diff gutter instead of converting the diff base) and calls `refresh_notebook_outputs`, which is also invoked after `:reload`/`:reload-all`. `GutterType::Cells` (in the default layout, collapses to width 0 without markers) draws the per-line cell bar.
+
+**`helix-term/`** — `commands/jupyter.rs`: `eval_line_range` (extracted core of `jupyter_eval_impl`), `jupyter_eval_cell` (whole-cell eval; the output anchored on the cell's last body line replaces the cell's previous/stored output), `goto_next_cell`/`goto_prev_cell` (bound to `]j`/`[j`). `ui/editor.rs::doc_cell_marker_highlights` styles delimiter lines via `OverlayHighlights` when the theme defines `ui.virtual.jupyter.cell.*`.
+
+Key behavioral facts (see `NOTEBOOK.md` for the rest):
+- Cell scanning is textual, so cell commands/rendering work in plain `# %%` buffers too; only the JSON round-trip is `.ipynb`-specific.
+- On save, only re-executed cells' outputs are rewritten; all other cells keep their stored outputs verbatim. Round-trip tests compare parsed `Value`s, not bytes (key order differs from Python's `nbformat`).
+- Theme scopes: `ui.virtual.jupyter.cell.{code,markdown}` (delimiters), `ui.gutter.jupyter.cell.{code,markdown}` (gutter bar).
+- Conversion unit tests live in `notebook.rs`; the end-to-end open/edit/save test (`notebook_open_converts_and_save_round_trips`, no kernel needed) is in `helix-term/tests/test/jupyter.rs`.
+
 ## Code folding feature architecture
 
 `FOLDING.md` is the user-facing documentation for the folding feature and is the authoritative spec for its commands, keybindings, theming, and limitations.

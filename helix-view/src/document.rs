@@ -204,6 +204,12 @@ pub struct Document {
     pub jupyter_outputs: Vec<crate::jupyter::JupyterOutput>,
     /// The kernel this document evaluates against, if any.
     pub jupyter_kernel: Option<helix_jupyter::KernelId>,
+    /// Retained nbformat JSON when this document was opened from an `.ipynb`
+    /// file (the buffer then holds the percent-format conversion).
+    pub notebook: Option<crate::notebook::NotebookFile>,
+    /// Percent-format cells (`# %%` delimiters) of the buffer, rescanned on
+    /// every edit. Empty when the buffer contains no cell markers.
+    cell_spans: Vec<crate::notebook::CellSpan>,
 
     /// Collapsed code blocks, sorted by `start` and non-overlapping.
     pub(crate) folds: Vec<FoldSpan>,
@@ -729,6 +735,7 @@ impl Document {
         let line_ending = config.load().default_line_ending.into();
         let changes = ChangeSet::new(text.slice(..));
         let old_state = None;
+        let cell_spans = crate::notebook::scan_cells(text.slice(..));
 
         Self {
             id: DocumentId::default(),
@@ -753,6 +760,8 @@ impl Document {
             diagnostics: Vec::new(),
             jupyter_outputs: Vec::new(),
             jupyter_kernel: None,
+            notebook: None,
+            cell_spans,
             folds: Vec::new(),
             version: 0,
             history: Cell::new(History::default()),
@@ -822,8 +831,22 @@ impl Document {
             (Rope::from(line_ending.as_str()), encoding, false)
         };
 
+        // Notebook files are edited as their percent-format conversion; the
+        // parsed JSON is retained on the document and patched back on save.
+        // Files that don't parse as a notebook open as plain JSON.
+        let notebook = if path.extension().is_some_and(|ext| ext == "ipynb") {
+            crate::notebook::parse_notebook(&rope.to_string())
+        } else {
+            None
+        };
+        let rope = match &notebook {
+            Some(nb) => Rope::from(crate::notebook::notebook_to_percent(nb)),
+            None => rope,
+        };
+
         let loader = syn_loader.load();
         let mut doc = Self::from(rope, Some((encoding, has_bom)), config, syn_loader);
+        doc.notebook = notebook.map(|json| crate::notebook::NotebookFile { json });
 
         // set the path and try detecting the language
         doc.set_path(Some(path));
@@ -1022,6 +1045,26 @@ impl Document {
             }
         };
 
+        // Notebook documents write nbformat JSON (the buffer's cell sources
+        // patched into the retained notebook); everything else writes the
+        // buffer itself. `text` still backs the saved event and LSP did-save.
+        let write_text = if path.extension().is_some_and(|ext| ext == "ipynb") {
+            let json = match &self.notebook {
+                Some(nb) => crate::notebook::serialize_notebook(
+                    text.slice(..),
+                    &nb.json,
+                    &self.jupyter_outputs,
+                )?,
+                None => crate::notebook::fresh_notebook(text.slice(..)),
+            };
+            let serialized = Rope::from(crate::notebook::to_json_string(&json));
+            // The written notebook becomes the new round-trip baseline.
+            self.notebook = Some(crate::notebook::NotebookFile { json });
+            serialized
+        } else {
+            text.clone()
+        };
+
         let identifier = self.path().map(|_| self.identifier());
         let language_servers: Vec<_> = self.language_servers.values().cloned().collect();
 
@@ -1118,7 +1161,7 @@ impl Document {
 
             let write_result: anyhow::Result<_> = async {
                 let mut dst = tokio::fs::File::create(&write_path).await?;
-                to_writer(&mut dst, encoding_with_bom_info, &text).await?;
+                to_writer(&mut dst, encoding_with_bom_info, &write_text).await?;
                 // Ignore ENOTSUP/EOPNOTSUPP (Operation not supported) errors from sync_all()
                 // This is known to occur on SMB filesystems on macOS where fsync is not supported
                 match dst.sync_all().await {
@@ -1213,6 +1256,23 @@ impl Document {
         &self,
         loader: &syntax::Loader,
     ) -> Option<Arc<syntax::config::LanguageConfiguration>> {
+        // A converted notebook buffer holds the notebook's source language,
+        // not the JSON its path suggests.
+        if let Some(nb) = &self.notebook {
+            let name = nb
+                .json
+                .pointer("/metadata/kernelspec/language")
+                .or_else(|| nb.json.pointer("/metadata/language_info/name"))
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or("python");
+            if let Some(language) = loader
+                .language_for_name(name)
+                .or_else(|| loader.language_for_name("python"))
+            {
+                return Some(loader.language(language).config().clone());
+            }
+        }
+
         let language = loader
             .language_for_filename(self.path.as_ref()?)
             .or_else(|| loader.language_for_shebang(self.text().slice(..)))?;
@@ -1299,6 +1359,23 @@ impl Document {
         let mut file = std::fs::File::open(&path)?;
         let (rope, ..) = from_reader(&mut file, Some(encoding))?;
 
+        // A notebook document reloads through the same JSON → percent-format
+        // conversion it was opened with. An unparseable file aborts the reload
+        // rather than clobbering the buffer with raw JSON.
+        let rope = if self.notebook.is_some() {
+            let Some(json) = crate::notebook::parse_notebook(&rope.to_string()) else {
+                bail!(
+                    "can't reload notebook {:?}: file is no longer valid nbformat JSON",
+                    self.display_name()
+                );
+            };
+            let rope = Rope::from(crate::notebook::notebook_to_percent(&json));
+            self.notebook = Some(crate::notebook::NotebookFile { json });
+            rope
+        } else {
+            rope
+        };
+
         // Calculate the difference between the buffer and source text, and apply it.
         // This is not considered a modification of the contents of the file regardless
         // of the encoding.
@@ -1309,9 +1386,15 @@ impl Document {
         self.pickup_last_saved_time();
         self.detect_indent_and_line_ending();
 
-        match provider_registry.get_diff_base(&path) {
-            Some(diff_base) => self.set_diff_base(diff_base),
-            None => self.diff_handle = None,
+        // The buffer of a notebook document is a conversion, not the on-disk
+        // content; a git diff against the JSON would mark every line changed.
+        if self.notebook.is_some() {
+            self.diff_handle = None;
+        } else {
+            match provider_registry.get_diff_base(&path) {
+                Some(diff_base) => self.set_diff_base(diff_base),
+                None => self.diff_handle = None,
+            }
         }
 
         self.version_control_head = provider_registry.get_current_head_name(&path);
@@ -1347,6 +1430,16 @@ impl Document {
         // if parent doesn't exist we still want to open the document
         // and error out when document is saved
         self.path = path;
+
+        // Renaming away from `.ipynb` turns the document into a plain text
+        // buffer: stop round-tripping through the retained notebook JSON.
+        if self
+            .path
+            .as_ref()
+            .is_none_or(|path| path.extension().is_none_or(|ext| ext != "ipynb"))
+        {
+            self.notebook = None;
+        }
 
         self.detect_readonly();
         self.pickup_last_saved_time();
@@ -1589,6 +1682,11 @@ impl Document {
                 .retain(|fold| text.char_to_line(fold.end) > text.char_to_line(fold.start) + 1);
             self.normalize_folds();
         }
+
+        // Cell delimiters are plain text, so spans can appear/move/vanish with
+        // any edit; rescan rather than remap. The scan is a cheap per-line
+        // prefix check and only runs when the document changed.
+        self.cell_spans = crate::notebook::scan_cells(self.text.slice(..));
 
         // Update the inlay hint annotations' positions, helping ensure they are displayed in the proper place
         let apply_inlay_hint_changes = |annotations: &mut Vec<InlineAnnotation>| {
@@ -2241,6 +2339,13 @@ impl Document {
     /// The document's folded regions, sorted by `start` and non-overlapping.
     pub fn folds(&self) -> &[FoldSpan] {
         &self.folds
+    }
+
+    /// The buffer's percent-format cells (`# %%` delimiters), in order. Empty
+    /// when the buffer contains no cell markers.
+    #[inline]
+    pub fn cell_spans(&self) -> &[crate::notebook::CellSpan] {
+        &self.cell_spans
     }
 
     /// Keeps `folds` sorted by `start` and drops folds that overlap an earlier

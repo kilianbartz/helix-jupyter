@@ -279,6 +279,10 @@
 | `goto_prev_entry` | Goto previous pairing | normal: `` [e ``, select: `` [e `` |
 | `goto_next_paragraph` | Goto next paragraph | normal: `` ]p ``, select: `` ]p `` |
 | `goto_prev_paragraph` | Goto previous paragraph | normal: `` [p ``, select: `` [p `` |
+| `goto_next_section` | Select next section (LaTeX outline) | normal: `` zs ``, select: `` zs `` |
+| `goto_prev_section` | Select previous section (LaTeX outline) | normal: `` zS ``, select: `` zS `` |
+| `goto_next_function_collapsed` | Goto next function (collapsed) | normal: `` ü ``, select: `` ü `` |
+| `goto_prev_function_collapsed` | Goto previous function (collapsed) | normal: `` Ü ``, select: `` Ü `` |
 | `dap_launch` | Launch debug target | normal: `` <space>Gl ``, select: `` <space>Gl `` |
 | `dap_restart` | Restart debugging session | normal: `` <space>Gr ``, select: `` <space>Gr `` |
 | `dap_toggle_breakpoint` | Toggle breakpoint | normal: `` <space>Gb ``, select: `` <space>Gb `` |
@@ -296,6 +300,9 @@
 | `dap_enable_exceptions` | Enable exception breakpoints | normal: `` <space>Ge ``, select: `` <space>Ge `` |
 | `dap_disable_exceptions` | Disable exception breakpoints | normal: `` <space>GE ``, select: `` <space>GE `` |
 | `jupyter_eval` | Evaluate selection in Jupyter kernel |  |
+| `jupyter_eval_cell` | Evaluate the cell under the cursor in Jupyter kernel |  |
+| `goto_next_cell` | Goto next notebook cell | normal: `` ]j ``, select: `` ]j `` |
+| `goto_prev_cell` | Goto previous notebook cell | normal: `` [j ``, select: `` [j `` |
 | `jupyter_variables` | Show Jupyter variable inspector |  |
 | `jupyter_kernel_select` | Select and start a Jupyter kernel |  |
 | `jupyter_restart` | Restart Jupyter kernel |  |

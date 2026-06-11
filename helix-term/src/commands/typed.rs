@@ -1556,6 +1556,7 @@ fn reload(cx: &mut compositor::Context, _args: Args, event: PromptEvent) -> anyh
 
     let scrolloff = cx.editor.config().scrolloff;
     let (view, doc) = current!(cx.editor);
+    let doc_id = doc.id();
     doc.reload(view, &cx.editor.diff_providers).map(|_| {
         view.ensure_cursor_in_view(doc, scrolloff);
     })?;
@@ -1565,6 +1566,7 @@ fn reload(cx: &mut compositor::Context, _args: Args, event: PromptEvent) -> anyh
             .file_event_handler
             .file_changed(path);
     }
+    cx.editor.refresh_notebook_outputs(doc_id);
     Ok(())
 }
 
@@ -1625,6 +1627,8 @@ fn reload_all(cx: &mut compositor::Context, _args: Args, event: PromptEvent) -> 
                 view.ensure_cursor_in_view(doc, scrolloff);
             }
         }
+
+        cx.editor.refresh_notebook_outputs(doc_id);
     }
 
     Ok(())
@@ -2164,6 +2168,18 @@ fn jupyter_eval(
         return Ok(());
     }
     crate::commands::jupyter::jupyter_eval_impl(cx.editor);
+    Ok(())
+}
+
+fn jupyter_eval_cell(
+    cx: &mut compositor::Context,
+    _args: Args,
+    event: PromptEvent,
+) -> anyhow::Result<()> {
+    if event != PromptEvent::Validate {
+        return Ok(());
+    }
+    crate::commands::jupyter::jupyter_eval_cell_impl(cx.editor);
     Ok(())
 }
 
@@ -3818,6 +3834,17 @@ pub const TYPABLE_COMMAND_LIST: &[TypableCommand] = &[
         aliases: &["jeval"],
         doc: "Evaluate the current selection in the Jupyter kernel.",
         fun: jupyter_eval,
+        completer: CommandCompleter::none(),
+        signature: Signature {
+            positionals: (0, Some(0)),
+            ..Signature::DEFAULT
+        },
+    },
+    TypableCommand {
+        name: "jupyter-eval-cell",
+        aliases: &["jcell"],
+        doc: "Evaluate the cell under the cursor ('# %%' block) in the Jupyter kernel.",
+        fun: jupyter_eval_cell,
         completer: CommandCompleter::none(),
         signature: Signature {
             positionals: (0, Some(0)),

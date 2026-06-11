@@ -105,6 +105,7 @@ impl Default for GutterConfig {
                 GutterType::LineNumbers,
                 GutterType::Spacer,
                 GutterType::Diff,
+                GutterType::Cells,
             ],
             line_numbers: GutterLineNumbersConfig::default(),
         }
@@ -866,6 +867,8 @@ pub enum GutterType {
     Spacer,
     /// Highlight local changes
     Diff,
+    /// Mark notebook cell extents (`# %%` percent-format buffers)
+    Cells,
 }
 
 impl std::str::FromStr for GutterType {
@@ -877,8 +880,9 @@ impl std::str::FromStr for GutterType {
             "spacer" => Ok(Self::Spacer),
             "line-numbers" => Ok(Self::LineNumbers),
             "diff" => Ok(Self::Diff),
+            "cells" => Ok(Self::Cells),
             _ => anyhow::bail!(
-                "Gutter type can only be `diagnostics`, `spacer`, `line-numbers` or `diff`."
+                "Gutter type can only be `diagnostics`, `spacer`, `line-numbers`, `diff` or `cells`."
             ),
         }
     }
@@ -2092,12 +2096,19 @@ impl Editor {
                 Editor::doc_diagnostics(&self.language_servers, &self.diagnostics, &doc);
             doc.replace_diagnostics(diagnostics, &[], None);
 
-            if let Some(diff_base) = self.diff_providers.get_diff_base(&path) {
-                doc.set_diff_base(diff_base);
+            // The buffer of a notebook document is a conversion of the on-disk
+            // JSON; a git diff against that JSON would mark every line changed,
+            // so notebook documents get no diff gutter.
+            if doc.notebook.is_none() {
+                if let Some(diff_base) = self.diff_providers.get_diff_base(&path) {
+                    doc.set_diff_base(diff_base);
+                }
             }
             doc.set_version_control_head(self.diff_providers.get_current_head_name(&path));
 
             let id = self.new_document(doc);
+            // Render the notebook's stored cell outputs inline.
+            self.refresh_notebook_outputs(id);
             self.launch_language_servers(id);
 
             helix_event::dispatch(DocumentDidOpen {
@@ -2319,6 +2330,29 @@ impl Editor {
         let id = self.jupyter_next_image_id;
         self.jupyter_next_image_id = self.jupyter_next_image_id.wrapping_add(1).max(1);
         id
+    }
+
+    /// Re-derive a notebook document's stored output blocks from its retained
+    /// notebook JSON (e.g. after `:reload` re-parsed the file), queuing the
+    /// replaced blocks' inline images for deletion from the terminal. No-op
+    /// for non-notebook documents.
+    pub fn refresh_notebook_outputs(&mut self, doc_id: DocumentId) {
+        let Some(doc) = self.documents.get_mut(&doc_id) else {
+            return;
+        };
+        if doc.notebook.is_none() {
+            return;
+        }
+        // Field-split borrow: the id allocator must run while `doc` borrows
+        // `self.documents`.
+        let next_image_id = &mut self.jupyter_next_image_id;
+        let mut alloc = || {
+            let id = *next_image_id;
+            *next_image_id = next_image_id.wrapping_add(1).max(1);
+            id
+        };
+        let removed = crate::notebook::load_outputs(doc, &mut alloc);
+        self.jupyter_pending_image_deletions.extend(removed);
     }
 
     /// Remove all inline Jupyter images, queuing them for deletion from the

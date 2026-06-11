@@ -13,7 +13,8 @@ use helix_stdx::{
 };
 use helix_vcs::{FileChange, Hunk};
 pub use jupyter::{
-    jupyter_eval, jupyter_kernel_select, jupyter_restart, jupyter_stop, jupyter_variables,
+    goto_next_cell, goto_prev_cell, jupyter_eval, jupyter_eval_cell, jupyter_kernel_select,
+    jupyter_restart, jupyter_stop, jupyter_variables,
 };
 pub use lsp::*;
 pub use syntax::*;
@@ -607,6 +608,9 @@ impl MappableCommand {
         dap_enable_exceptions, "Enable exception breakpoints",
         dap_disable_exceptions, "Disable exception breakpoints",
         jupyter_eval, "Evaluate selection in Jupyter kernel",
+        jupyter_eval_cell, "Evaluate the cell under the cursor in Jupyter kernel",
+        goto_next_cell, "Goto next notebook cell",
+        goto_prev_cell, "Goto previous notebook cell",
         jupyter_variables, "Show Jupyter variable inspector",
         jupyter_kernel_select, "Select and start a Jupyter kernel",
         jupyter_restart, "Restart Jupyter kernel",

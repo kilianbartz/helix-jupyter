@@ -123,6 +123,7 @@ pub fn default() -> HashMap<Mode, KeyTrie> {
             "T" => goto_prev_test,
             "p" => goto_prev_paragraph,
             "x" => goto_prev_xml_element,
+            "j" => goto_prev_cell,
             "space" => add_newline_above,
         },
         "]" => { "Right bracket"
@@ -138,6 +139,7 @@ pub fn default() -> HashMap<Mode, KeyTrie> {
             "T" => goto_next_test,
             "p" => goto_next_paragraph,
             "x" => goto_next_xml_element,
+            "j" => goto_next_cell,
             "space" => add_newline_below,
         },
 

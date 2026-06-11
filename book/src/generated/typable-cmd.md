@@ -67,6 +67,7 @@
 | `:jupyter-stop`, `:jstop` | Stop the current document's Jupyter kernel. |
 | `:jupyter-restart` | Restart the current document's Jupyter kernel. |
 | `:jupyter-eval`, `:jeval` | Evaluate the current selection in the Jupyter kernel. |
+| `:jupyter-eval-cell`, `:jcell` | Evaluate the cell under the cursor ('# %%' block) in the Jupyter kernel. |
 | `:jupyter-variables`, `:jvars` | Show the Jupyter variable inspector for the current document. |
 | `:jupyter-kernel-select`, `:jkernel` | Pick a kernelspec to start for the current document. |
 | `:fold` | Fold the function or class at the cursor. |

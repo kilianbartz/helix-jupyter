@@ -14,6 +14,7 @@ pub mod info;
 pub mod input;
 pub mod jupyter;
 pub mod keyboard;
+pub mod notebook;
 pub mod register;
 pub mod theme;
 pub mod tree;

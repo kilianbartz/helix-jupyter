@@ -6,6 +6,128 @@ use helix_view::jupyter::{ExecutionState, JupyterOutput};
 
 use super::helpers::AppBuilder;
 
+/// Open a real `.ipynb` file and verify the whole notebook pipeline without a
+/// kernel: JSON → percent-format conversion, python language detection, stored
+/// outputs rendered as jupyter output blocks, no diff gutter, and a save that
+/// patches the edited source back while preserving notebook/cell metadata and
+/// the stored outputs of cells that were not re-executed.
+#[tokio::test(flavor = "multi_thread")]
+async fn notebook_open_converts_and_save_round_trips() -> anyhow::Result<()> {
+    use std::io::Write as _;
+
+    let nb = serde_json::json!({
+        "cells": [
+            {
+                "cell_type": "markdown",
+                "id": "intro",
+                "metadata": {},
+                "source": ["# Demo\n", "\n", "Hello *world*."]
+            },
+            {
+                "cell_type": "code",
+                "id": "calc",
+                "execution_count": 2,
+                "metadata": {"tags": ["keep-me"]},
+                "outputs": [
+                    {"output_type": "stream", "name": "stdout", "text": ["the answer\n"]},
+                    {"output_type": "execute_result", "execution_count": 2,
+                     "data": {"text/plain": ["42"]}, "metadata": {}}
+                ],
+                "source": ["x = 40 + 2\n", "print('the answer')\n", "x"]
+            }
+        ],
+        "metadata": {
+            "kernelspec": {"name": "python3", "language": "python", "display_name": "Python 3"},
+            "custom": {"do-not-touch": true}
+        },
+        "nbformat": 4,
+        "nbformat_minor": 5
+    });
+
+    let mut file = tempfile::Builder::new().suffix(".ipynb").tempfile()?;
+    file.write_all(serde_json::to_string(&nb)?.as_bytes())?;
+    file.flush()?;
+
+    let mut app = AppBuilder::new()
+        .with_file(file.path().to_path_buf(), None)
+        .build()?;
+    let editor = &mut app.editor;
+    let doc_id = doc!(editor).id();
+
+    {
+        let doc = doc!(editor);
+        assert!(doc.notebook.is_some(), "notebook JSON should be retained");
+        assert_eq!(doc.language_name(), Some("python"));
+        assert!(
+            doc.diff_handle().is_none(),
+            "notebooks must not get a diff gutter"
+        );
+
+        let text = doc.text().to_string();
+        assert!(
+            text.starts_with("# %% [markdown]\n# # Demo\n#\n# Hello *world*.\n"),
+            "unexpected conversion: {text:?}"
+        );
+        assert!(
+            text.contains("# %%\nx = 40 + 2\n"),
+            "unexpected conversion: {text:?}"
+        );
+        assert_eq!(doc.cell_spans().len(), 2);
+
+        // The stored outputs render as a Done output block under the code cell.
+        assert_eq!(doc.jupyter_outputs.len(), 1);
+        let output = &doc.jupyter_outputs[0];
+        assert!(output.execution_id.starts_with("notebook:"));
+        assert_eq!(output.state, ExecutionState::Done);
+        let lines: Vec<&str> = output.lines.iter().map(|l| l.text.as_str()).collect();
+        assert_eq!(lines, vec!["the answer", "42"]);
+    }
+
+    // Edit the code cell, then save and re-read the file as JSON.
+    {
+        let (view, doc) = helix_view::current!(editor);
+        let offset = doc.text().to_string().find("40 + 2").unwrap();
+        let transaction = helix_core::Transaction::change(
+            doc.text(),
+            [(offset, offset + "40 + 2".len(), Some("6 * 7".into()))].into_iter(),
+        );
+        doc.apply(&transaction, view.id);
+    }
+    let future = editor
+        .document_mut(doc_id)
+        .unwrap()
+        .save(None::<std::path::PathBuf>, true)?;
+    future.await?;
+
+    let saved: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(file.path())?)?;
+    assert_eq!(saved["nbformat"], 4);
+    assert_eq!(
+        saved["metadata"], nb["metadata"],
+        "notebook metadata must round-trip"
+    );
+    assert_eq!(
+        saved["cells"][0], nb["cells"][0],
+        "untouched markdown cell must round-trip"
+    );
+    let code = &saved["cells"][1];
+    assert_eq!(code["id"], "calc");
+    assert_eq!(code["execution_count"], 2);
+    assert_eq!(code["metadata"], nb["cells"][1]["metadata"]);
+    assert_eq!(
+        code["outputs"], nb["cells"][1]["outputs"],
+        "stored outputs of a non-re-executed cell must be preserved"
+    );
+    let source: String = code["source"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|line| line.as_str().unwrap())
+        .collect();
+    assert_eq!(source, "x = 6 * 7\nprint('the answer')\nx");
+
+    Ok(())
+}
+
 /// Exercise the non-blocking kernel start: kick off `start_client`, pump the
 /// editor event loop until the `JupyterKernelStarted` event arrives, apply it
 /// with `finish_start`, and assert the kernel is then `Ready` (a usable client)

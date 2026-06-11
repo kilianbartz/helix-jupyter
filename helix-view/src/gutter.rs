@@ -32,6 +32,7 @@ impl GutterType {
             GutterType::LineNumbers => line_numbers(editor, doc, view, theme, is_focused),
             GutterType::Spacer => padding(editor, doc, view, theme, is_focused),
             GutterType::Diff => diff(editor, doc, view, theme, is_focused),
+            GutterType::Cells => cells(editor, doc, view, theme, is_focused),
         }
     }
 
@@ -41,6 +42,8 @@ impl GutterType {
             GutterType::LineNumbers => line_numbers_width(view, doc),
             GutterType::Spacer => 1,
             GutterType::Diff => 1,
+            // Collapses entirely in buffers without `# %%` cell markers.
+            GutterType::Cells => usize::from(!doc.cell_spans().is_empty()),
         }
     }
 }
@@ -139,12 +142,63 @@ pub fn diff<'doc>(
     }
 }
 
-/// Marks the signature line of every closed fold with a diamond in the gutter.
-fn fold<'doc>(
+/// Marks the extent of every notebook cell (`# %%` percent-format block) with
+/// a vertical bar colored by cell type.
+pub fn cells<'doc>(
     _editor: &'doc Editor,
     doc: &'doc Document,
+    _view: &View,
     theme: &Theme,
+    _is_focused: bool,
 ) -> GutterFn<'doc> {
+    use crate::notebook::{cell_at_line, CellKind};
+
+    let spans = doc.cell_spans();
+    if spans.is_empty() {
+        return Box::new(move |_, _, _, _| None);
+    }
+
+    // Per-kind styles, themeable via the gutter scope and falling back to the
+    // virtual-text scope used for the delimiter lines, then to fixed colors.
+    // Exact lookups: the dot-fallback of `try_get` would land on the generic
+    // `ui.gutter`/`ui.virtual` styles and erase the per-kind distinction.
+    let kind_style = |gutter_scope: &str, virtual_scope: &str, fallback: Color| {
+        let style = theme
+            .try_get_exact(gutter_scope)
+            .or_else(|| theme.try_get_exact(virtual_scope))
+            .or_else(|| theme.try_get_exact("ui.virtual.jupyter.cell"))
+            .unwrap_or_default();
+        if style.fg.is_none() {
+            style.fg(fallback)
+        } else {
+            style
+        }
+    };
+    let code = kind_style(
+        "ui.gutter.jupyter.cell.code",
+        "ui.virtual.jupyter.cell.code",
+        Color::Blue,
+    );
+    let markdown = kind_style(
+        "ui.gutter.jupyter.cell.markdown",
+        "ui.virtual.jupyter.cell.markdown",
+        Color::Yellow,
+    );
+
+    Box::new(
+        move |line: usize, _selected: bool, _first_visual_line: bool, out: &mut String| {
+            let cell = cell_at_line(spans, line)?;
+            write!(out, "▍").unwrap();
+            Some(match cell.kind {
+                CellKind::Code => code,
+                CellKind::Markdown | CellKind::Raw => markdown,
+            })
+        },
+    )
+}
+
+/// Marks the signature line of every closed fold with a diamond in the gutter.
+fn fold<'doc>(_editor: &'doc Editor, doc: &'doc Document, theme: &Theme) -> GutterFn<'doc> {
     // Default to a white diamond; the `ui.gutter.fold` scope (falling back to
     // `ui.virtual.fold`, the `…` marker color) lets themes override it.
     let mut style = theme.get("ui.gutter.fold");
@@ -381,12 +435,23 @@ mod tests {
             Arc::new(ArcSwap::from_pointee(syntax::Loader::default())),
         );
 
-        assert_eq!(view.gutters.layout.len(), 5);
+        assert_eq!(view.gutters.layout.len(), 6);
         assert_eq!(view.gutters.layout[0].width(&view, &doc), 1);
         assert_eq!(view.gutters.layout[1].width(&view, &doc), 1);
         assert_eq!(view.gutters.layout[2].width(&view, &doc), 3);
         assert_eq!(view.gutters.layout[3].width(&view, &doc), 1);
         assert_eq!(view.gutters.layout[4].width(&view, &doc), 1);
+        // The cells gutter collapses in buffers without `# %%` markers …
+        assert_eq!(view.gutters.layout[5].width(&view, &doc), 0);
+
+        // … and occupies one column in percent-format buffers.
+        let cell_doc = Document::from(
+            Rope::from_str("# %%\nx = 1\n"),
+            None,
+            Arc::new(ArcSwap::new(Arc::new(Config::default()))),
+            Arc::new(ArcSwap::from_pointee(syntax::Loader::default())),
+        );
+        assert_eq!(view.gutters.layout[5].width(&view, &cell_doc), 1);
     }
 
     #[test]

@@ -145,6 +145,8 @@ impl EditorView {
             overlays.push(overlay);
         }
 
+        Self::doc_cell_marker_highlights(doc, theme, &mut overlays);
+
         Self::doc_diagnostics_highlights_into(doc, theme, &mut overlays);
 
         if is_focused {
@@ -556,6 +558,54 @@ impl EditorView {
         }
 
         Some(OverlayHighlights::Homogeneous { highlight, ranges })
+    }
+
+    /// Style the `# %%` cell delimiter lines of percent-format buffers, one
+    /// overlay per cell kind. Only active when the theme defines the
+    /// `ui.virtual.jupyter.cell`(`.code`/`.markdown`) scopes; the cells gutter
+    /// provides the always-on visual.
+    pub fn doc_cell_marker_highlights(
+        doc: &Document,
+        theme: &Theme,
+        overlays: &mut Vec<OverlayHighlights>,
+    ) {
+        use helix_view::notebook::CellKind;
+
+        if doc.cell_spans().is_empty() {
+            return;
+        }
+        let text = doc.text().slice(..);
+        let find = |scope: &str| {
+            theme
+                .find_highlight_exact(scope)
+                .or_else(|| theme.find_highlight_exact("ui.virtual.jupyter.cell"))
+        };
+        let highlights = [
+            (CellKind::Code, find("ui.virtual.jupyter.cell.code")),
+            (CellKind::Markdown, find("ui.virtual.jupyter.cell.markdown")),
+        ];
+        for (kind, highlight) in highlights {
+            let Some(highlight) = highlight else { continue };
+            let ranges: Vec<ops::Range<usize>> = doc
+                .cell_spans()
+                .iter()
+                .filter(|cell| {
+                    // Skip implicit leading cells: their first line is body text,
+                    // not a delimiter. Raw cells style like markdown.
+                    cell.start_line == cell.marker_line + 1
+                        && match cell.kind {
+                            CellKind::Code => kind == CellKind::Code,
+                            CellKind::Markdown | CellKind::Raw => kind == CellKind::Markdown,
+                        }
+                })
+                .map(|cell| {
+                    text.line_to_char(cell.marker_line)..text.line_to_char(cell.marker_line + 1)
+                })
+                .collect();
+            if !ranges.is_empty() {
+                overlays.push(OverlayHighlights::Homogeneous { highlight, ranges });
+            }
+        }
     }
 
     /// Get highlight spans for selections in a document view.

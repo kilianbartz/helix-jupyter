@@ -134,8 +134,7 @@ pub fn jupyter_eval(cx: &mut Context) {
 pub fn jupyter_eval_impl(editor: &mut Editor) {
     let (view, doc) = current!(editor);
     let doc_id = doc.id();
-    let text = doc.text();
-    let slice = text.slice(..);
+    let slice = doc.text().slice(..);
     let range = doc.selection(view.id).primary();
 
     // Evaluate the *whole lines* spanned by the selection. A bare cursor in
@@ -147,6 +146,17 @@ pub fn jupyter_eval_impl(editor: &mut Editor) {
     } else {
         start_line
     };
+    eval_line_range(editor, doc_id, start_line, end_line);
+}
+
+/// Evaluate the inclusive document line range `start_line..=end_line` in the
+/// document's kernel, auto-starting or queueing if it isn't ready yet. The
+/// output block is anchored below `end_line`.
+fn eval_line_range(editor: &mut Editor, doc_id: DocumentId, start_line: usize, end_line: usize) {
+    let Some(doc) = editor.documents.get(&doc_id) else {
+        return;
+    };
+    let slice = doc.text().slice(..);
     let from_char = slice.line_to_char(start_line);
     let to_char = slice.line_to_char((end_line + 1).min(slice.len_lines()));
     let code = slice.slice(from_char..to_char).to_string();
@@ -199,6 +209,95 @@ pub fn jupyter_eval_impl(editor: &mut Editor) {
         anchor,
         last_line,
     });
+}
+
+/// Evaluate the percent-format cell (`# %%` block) under the cursor.
+pub fn jupyter_eval_cell(cx: &mut Context) {
+    jupyter_eval_cell_impl(cx.editor);
+}
+
+pub fn jupyter_eval_cell_impl(editor: &mut Editor) {
+    use helix_view::notebook::{cell_at_line, CellKind};
+
+    let (view, doc) = current!(editor);
+    let doc_id = doc.id();
+    let text = doc.text().slice(..);
+    let cursor_line = doc.selection(view.id).primary().cursor_line(text);
+
+    if doc.cell_spans().is_empty() {
+        editor.set_error("No cell at cursor (no '# %%' markers in buffer)");
+        return;
+    }
+    let Some(cell) = cell_at_line(doc.cell_spans(), cursor_line).copied() else {
+        editor.set_error("No cell at cursor");
+        return;
+    };
+    match cell.kind {
+        CellKind::Markdown | CellKind::Raw => {
+            editor.set_status("Markdown/raw cell — not evaluated");
+            return;
+        }
+        CellKind::Code => {}
+    }
+    if cell.start_line >= cell.end_line {
+        editor.set_error("Nothing to evaluate (empty cell)");
+        return;
+    }
+    // The delimiter line is excluded; the output anchors below the last body
+    // line, replacing any previous output of this cell.
+    eval_line_range(editor, doc_id, cell.start_line, cell.end_line - 1);
+}
+
+/// Move the cursor to the first body line of the next/previous cell.
+fn goto_cell_impl(cx: &mut Context, forward: bool) {
+    use helix_core::Selection;
+
+    let (view, doc) = current!(cx.editor);
+    let text = doc.text().slice(..);
+    let cursor_line = doc.selection(view.id).primary().cursor_line(text);
+
+    let cells = doc.cell_spans();
+    let no_cells = cells.is_empty();
+    let current = cells
+        .iter()
+        .position(|cell| cell.contains_line(cursor_line));
+    let target = if forward {
+        match current {
+            Some(i) => cells.get(i + 1),
+            None => cells.iter().find(|cell| cell.marker_line > cursor_line),
+        }
+    } else {
+        match current {
+            Some(i) => i.checked_sub(1).and_then(|i| cells.get(i)),
+            None => cells.iter().rev().find(|cell| cell.end_line <= cursor_line),
+        }
+    };
+    let Some(cell) = target.copied() else {
+        cx.editor.set_status(if no_cells {
+            "No '# %%' cells in buffer"
+        } else if forward {
+            "Already at the last cell"
+        } else {
+            "Already at the first cell"
+        });
+        return;
+    };
+    // Land on the first body line; for an empty cell, on its delimiter.
+    let line = if cell.start_line < cell.end_line {
+        cell.start_line
+    } else {
+        cell.marker_line
+    };
+    let pos = text.line_to_char(line.min(text.len_lines().saturating_sub(1)));
+    doc.set_selection(view.id, Selection::point(pos));
+}
+
+pub fn goto_next_cell(cx: &mut Context) {
+    goto_cell_impl(cx, true);
+}
+
+pub fn goto_prev_cell(cx: &mut Context) {
+    goto_cell_impl(cx, false);
 }
 
 /// Execute `code` in the document's (ready) `kernel`, firing the optional
