@@ -108,24 +108,79 @@ command = "helix-spell-lsp"
 config = { dictionary = "en_US", project-dict-file = ".spell.dic", severity = "info", ignore-uppercase = true, max-suggestions = 5 }
 ```
 
-| Key                 | Default       | Meaning                                                            |
-| ------------------- | ------------- | ------------------------------------------------------------------ |
-| `dictionary`        | `"en_US"`     | Dictionary name to look up in the standard directories.            |
-| `aff-path`          | —             | Explicit path to a `.aff` file (overrides `dictionary`).           |
-| `dic-path`          | —             | Explicit path to a `.dic` file (overrides `dictionary`).           |
-| `project-dict-file` | `".spell.dic"`| Project word-list file name, relative to the workspace root.       |
-| `severity`          | `"info"`      | Diagnostic severity: `error` \| `warning` \| `info` \| `hint`.     |
-| `ignore-uppercase`  | `true`        | Skip all-caps acronyms.                                            |
-| `max-suggestions`   | `5`           | Max replacement suggestions offered per misspelling.               |
+| Key                   | Default        | Meaning                                                                  |
+| --------------------- | -------------- | ------------------------------------------------------------------------ |
+| `dictionary`          | `"en_US"`      | Dictionary name to look up in the standard directories.                  |
+| `dictionaries`        | `[]`           | Several dictionary names to load together (mixed mode); overrides `dictionary`. |
+| `language`            | —              | Restrict checking to this single dictionary (see [Multiple languages](#multiple-languages)). |
+| `aff-path`            | —              | Explicit path to a `.aff` file (overrides `dictionary`).                 |
+| `dic-path`            | —              | Explicit path to a `.dic` file (overrides `dictionary`).                 |
+| `project-dict-file`   | `".spell.dic"` | Project word-list file name, relative to the workspace root.             |
+| `project-config-file` | `".spell.toml"`| Per-project config file name, relative to the workspace root.            |
+| `severity`            | `"info"`       | Diagnostic severity: `error` \| `warning` \| `info` \| `hint`.           |
+| `ignore-uppercase`    | `true`         | Skip all-caps acronyms.                                                  |
+| `max-suggestions`     | `5`            | Max replacement suggestions offered per misspelling.                     |
 
 The server is registered for LaTeX, Markdown and Typst with
 `only-features = ["diagnostics", "code-action"]`, so it never competes with
 `texlab`/`marksman`/`tinymist` for completion, formatting, or navigation.
 
+## Multiple languages
+
+List several dictionaries to spell-check multilingual documents:
+
+```toml
+[language-server.helix-spell]
+command = "helix-spell-lsp"
+config = { dictionaries = ["en_US", "de_DE"] }
+```
+
+This is **mixed mode** (the default whenever more than one dictionary is
+configured): a word is accepted if *any* loaded dictionary knows it, so English
+and German can coexist in the same document. Replacement suggestions are merged
+from all dictionaries (each dictionary's best suggestion first, deduplicated,
+capped at `max-suggestions`). An explicit `aff-path`/`dic-path` pair counts as
+one more dictionary, named after the `.dic` file.
+
+### Per-project language selection
+
+A project can override the language setup with a small **`.spell.toml`** file at
+the workspace root (next to `.spell.dic`; the file name is configurable via
+`project-config-file`):
+
+```toml
+# .spell.toml — restrict this project to a single language:
+language = "de_DE"
+
+# or pick which dictionaries to mix (default: the set from languages.toml):
+# dictionaries = ["en_US", "de_DE"]
+```
+
+Fields set here override their `languages.toml` counterparts field by field.
+`language` switches to **single-language mode**: only that dictionary is loaded
+and checked against (it does not need to appear in `dictionaries` as long as it
+resolves in the standard directories). If it cannot be found, the server reports
+an error and checks nothing rather than silently falling back to the wrong
+language. The `language` key also works globally in `languages.toml` as a
+machine-wide default.
+
+The project and personal word lists ([Dictionaries you can add
+to](#dictionaries-you-can-add-to)) are language-agnostic and apply in every mode.
+
+`.spell.toml` is read once at server startup — after editing it, run
+`:lsp-restart` to apply the change. On startup the server logs which
+dictionaries were loaded and the active mode (e.g.
+`helix-spell-lsp ready (dictionaries: en_US, de_DE — mixed mode)`).
+
 ## Limitations
 
-- **English by default**, one dictionary at a time. Switch languages with
-  `dictionary` (or `aff-path`/`dic-path`); there is no per-document switching.
+- **English by default.** Switch or mix languages with `dictionary`,
+  `dictionaries`, or a project `.spell.toml` (see
+  [Multiple languages](#multiple-languages)); there is no per-document switching.
+- **Mixed mode accepts a word that is valid in *any* configured language**, so
+  cross-language false negatives are possible (e.g. a German word in an English
+  sentence is not flagged). Use `language` to restrict a project to one language.
+- `.spell.toml` is only read at startup; run `:lsp-restart` after changing it.
 - **Spelling only** — no grammar/style checking (use `ltex`/`harper` for that).
 - **Suggestions are best-effort.** `zspell`'s suggestion engine is edit-distance
   based and may miss transpositions (e.g. it will not always suggest *word* for

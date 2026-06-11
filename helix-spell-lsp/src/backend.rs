@@ -9,8 +9,8 @@ use serde_json::json;
 use tower_lsp::lsp_types::*;
 use tower_lsp::{Client, LanguageServer};
 
-use crate::config::Config;
-use crate::dictionary::{self, Dictionary, Scope};
+use crate::config::{self, Config, ProjectConfig};
+use crate::dictionary::{self, DictSpec, Dictionary, Scope};
 use crate::extract::{self, Language};
 use crate::position::LineIndex;
 
@@ -28,6 +28,8 @@ struct State {
     dictionary: Option<Dictionary>,
     workspace_root: Option<PathBuf>,
     documents: HashMap<Url, Document>,
+    /// Dictionary summary for the "ready" log line, composed in `initialize`.
+    status: String,
 }
 
 pub struct Backend {
@@ -88,10 +90,79 @@ impl LanguageServer for Backend {
         let workspace_root = workspace_root(&params);
         let config = Config::from_value(params.initialization_options);
 
-        // Resolve the base dictionary (explicit paths win over a name lookup).
-        let resolved = match (&config.aff_path, &config.dic_path) {
-            (Some(aff), Some(dic)) => Some((PathBuf::from(aff), PathBuf::from(dic))),
-            _ => dictionary::resolve_dictionary(&config.dictionary),
+        let mut warnings: Vec<String> = Vec::new();
+        let mut errors: Vec<String> = Vec::new();
+
+        // Per-project config (`.spell.toml`) overrides the global one.
+        let project_cfg = match workspace_root
+            .as_ref()
+            .map(|root| root.join(&config.project_config_file))
+        {
+            Some(path) => match ProjectConfig::load(&path) {
+                Ok(pc) => pc.unwrap_or_default(),
+                Err(e) => {
+                    warnings.push(format!("ignoring project config: {e}"));
+                    ProjectConfig::default()
+                }
+            },
+            None => ProjectConfig::default(),
+        };
+        let restricted_by_project = project_cfg
+            .language
+            .as_ref()
+            .is_some_and(|l| !l.trim().is_empty());
+        let eff = config::effective_spelling(&config, &project_cfg);
+
+        // An explicit aff/dic pair acts as one more dictionary, named after
+        // the .dic file (and as the sole one when no names are configured).
+        let explicit = match (&config.aff_path, &config.dic_path) {
+            (Some(aff), Some(dic)) => {
+                let dic = PathBuf::from(dic);
+                let name = dic
+                    .file_stem()
+                    .and_then(|s| s.to_str())
+                    .unwrap_or("custom")
+                    .to_string();
+                Some(DictSpec {
+                    name,
+                    aff: PathBuf::from(aff),
+                    dic,
+                })
+            }
+            _ => None,
+        };
+
+        let specs: Vec<DictSpec> = match &eff.language {
+            // Single-language mode: load only the selected dictionary. It
+            // need not appear in the configured list; never silently fall
+            // back to mixed mode.
+            Some(lang) => {
+                let spec = match explicit.filter(|s| s.name == *lang) {
+                    Some(spec) => Some(spec),
+                    None => dictionary::resolve_dictionary(lang).map(|(aff, dic)| DictSpec {
+                        name: lang.clone(),
+                        aff,
+                        dic,
+                    }),
+                };
+                match spec {
+                    Some(spec) => vec![spec],
+                    None => {
+                        errors.push(format!(
+                            "could not find dictionary '{lang}' (selected by `language`) \
+                             in the standard directories"
+                        ));
+                        Vec::new()
+                    }
+                }
+            }
+            // Mixed mode: load every configured dictionary.
+            None => {
+                let (mut specs, resolve_warnings) = dictionary::resolve_specs(&eff.names);
+                warnings.extend(resolve_warnings);
+                specs.extend(explicit);
+                specs
+            }
         };
 
         let project_path = workspace_root
@@ -99,28 +170,51 @@ impl LanguageServer for Backend {
             .map(|root| root.join(&config.project_dict_file));
         let personal_path = dictionary::default_personal_path();
 
-        let dictionary = match resolved {
-            Some((aff, dic)) => match Dictionary::load(&aff, &dic, personal_path, project_path) {
-                Ok(d) => Some(d),
+        let dictionary = if specs.is_empty() {
+            if errors.is_empty() {
+                errors.push("no dictionaries could be resolved".to_string());
+            }
+            None
+        } else {
+            match Dictionary::load(&specs, personal_path, project_path) {
+                Ok((d, load_warnings)) => {
+                    warnings.extend(load_warnings);
+                    Some(d)
+                }
                 Err(e) => {
-                    self.client
-                        .log_message(MessageType::ERROR, format!("helix-spell: {e}"))
-                        .await;
+                    errors.push(e);
                     None
                 }
-            },
-            None => {
-                self.client
-                    .log_message(
-                        MessageType::ERROR,
-                        format!(
-                            "helix-spell: could not find dictionary '{}' in the standard directories",
-                            config.dictionary
-                        ),
-                    )
-                    .await;
-                None
             }
+        };
+
+        for warning in &warnings {
+            self.client
+                .log_message(MessageType::WARNING, format!("helix-spell: {warning}"))
+                .await;
+        }
+        for error in &errors {
+            self.client
+                .log_message(MessageType::ERROR, format!("helix-spell: {error}"))
+                .await;
+        }
+
+        let status = match &dictionary {
+            Some(d) => {
+                let names = d.loaded_names().join(", ");
+                match &eff.language {
+                    Some(_) if restricted_by_project => format!(
+                        "dictionary: {names} — restricted by {}",
+                        config.project_config_file
+                    ),
+                    Some(_) => format!("dictionary: {names} — single-language mode"),
+                    None if d.loaded_names().len() > 1 => {
+                        format!("dictionaries: {names} — mixed mode")
+                    }
+                    None => format!("dictionary: {names}"),
+                }
+            }
+            None => "no dictionary loaded".to_string(),
         };
 
         {
@@ -128,6 +222,7 @@ impl LanguageServer for Backend {
             state.config = config;
             state.workspace_root = workspace_root;
             state.dictionary = dictionary;
+            state.status = status;
         }
 
         Ok(InitializeResult {
@@ -150,8 +245,12 @@ impl LanguageServer for Backend {
     }
 
     async fn initialized(&self, _: InitializedParams) {
+        let status = self.state.lock().unwrap().status.clone();
         self.client
-            .log_message(MessageType::INFO, "helix-spell-lsp ready")
+            .log_message(
+                MessageType::INFO,
+                format!("helix-spell-lsp ready ({status})"),
+            )
             .await;
     }
 
