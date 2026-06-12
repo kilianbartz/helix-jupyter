@@ -15,12 +15,14 @@ use tower_lsp::lsp_types::*;
 use tower_lsp::{Client, LanguageServer};
 
 use crate::config::{Config, ProjectConfig};
-use crate::llm::{Issue, Llm};
+use crate::llm::{Explanation, Issue, Llm};
 use crate::position::LineIndex;
 
 const SOURCE: &str = "helix-style";
 const CHECK_COMMAND: &str = "helix-style.check";
 const REPHRASE_COMMAND: &str = "helix-style.rephrase";
+const SYNONYM_COMMAND: &str = "helix-style.synonyms";
+const EXPLAIN_COMMAND: &str = "helix-style.explain";
 
 #[derive(Default)]
 struct State {
@@ -123,7 +125,12 @@ impl LanguageServer for Backend {
                 )),
                 code_action_provider: Some(CodeActionProviderCapability::Simple(true)),
                 execute_command_provider: Some(ExecuteCommandOptions {
-                    commands: vec![CHECK_COMMAND.to_string(), REPHRASE_COMMAND.to_string()],
+                    commands: vec![
+                        CHECK_COMMAND.to_string(),
+                        REPHRASE_COMMAND.to_string(),
+                        SYNONYM_COMMAND.to_string(),
+                        EXPLAIN_COMMAND.to_string(),
+                    ],
                     ..Default::default()
                 }),
                 ..Default::default()
@@ -233,6 +240,28 @@ impl LanguageServer for Backend {
                 REPHRASE_COMMAND,
                 vec![json!(uri), json!(range)],
             ));
+            actions.push(command_action(
+                "Explain selection",
+                EXPLAIN_COMMAND,
+                vec![json!(uri), json!(range)],
+            ));
+
+            // Synonyms only make sense for a single selected word; offer the
+            // action only when the selection is exactly that.
+            let selected = {
+                let state = self.state.lock().unwrap();
+                state.documents.get(&uri).map(|text| {
+                    let (s, e) = LineIndex::new(text).byte_range(range);
+                    text[s..e.min(text.len())].to_string()
+                })
+            };
+            if selected.as_deref().is_some_and(is_single_word) {
+                actions.push(command_action(
+                    "Replace with synonym…",
+                    SYNONYM_COMMAND,
+                    vec![json!(uri), json!(range)],
+                ));
+            }
         }
 
         Ok(Some(actions))
@@ -248,6 +277,8 @@ impl LanguageServer for Backend {
         match params.command.as_str() {
             CHECK_COMMAND => self.run_check(uri, range).await,
             REPHRASE_COMMAND => self.run_rephrase(uri, range).await,
+            SYNONYM_COMMAND => self.run_synonyms(uri, range).await,
+            EXPLAIN_COMMAND => self.run_explain(uri, range).await,
             _ => {}
         }
         Ok(None)
@@ -472,6 +503,177 @@ impl Backend {
         }
     }
 
+    /// Ask the LLM for synonyms of the single selected word (judged in the
+    /// context of its sentence), let the user pick one, and apply it.
+    async fn run_synonyms(&self, uri: Url, range: Range) {
+        if range.start == range.end {
+            return;
+        }
+        let Some((llm, config)) = self.snapshot() else {
+            return;
+        };
+
+        // Slice the selected word and the sentence it sits in for context.
+        let (word, sentence) = {
+            let state = self.state.lock().unwrap();
+            let Some(text) = state.documents.get(&uri) else {
+                return;
+            };
+            let (s, e) = LineIndex::new(text).byte_range(range);
+            let e = e.min(text.len());
+            (text[s..e].to_string(), surrounding_sentence(text, s, e))
+        };
+
+        if !is_single_word(&word) {
+            return;
+        }
+
+        self.notify(MessageType::INFO, "helix-style: finding synonyms…")
+            .await;
+
+        let synonyms = match llm
+            .synonyms(
+                word.trim(),
+                &sentence,
+                config.synonym_options.max(1),
+                &config.style_profile,
+                config.extra_instructions.as_deref(),
+            )
+            .await
+        {
+            Ok(syns) => syns,
+            Err(e) => {
+                self.notify(MessageType::ERROR, &format!("helix-style: {e}"))
+                    .await;
+                return;
+            }
+        };
+
+        // Each synonym is short, so the full word fits in the menu item itself.
+        let mut message = format!("helix-style — synonyms for \"{}\":", word.trim());
+        let actions: Vec<MessageActionItem> = synonyms
+            .iter()
+            .enumerate()
+            .map(|(i, syn)| MessageActionItem {
+                title: format!("{}. {}", i + 1, one_line(syn, 80)),
+                properties: HashMap::new(),
+            })
+            .collect();
+        message.push('\n');
+
+        let chosen = self
+            .client
+            .show_message_request(MessageType::INFO, message, Some(actions))
+            .await;
+
+        let Ok(Some(item)) = chosen else {
+            return;
+        };
+        let Some(idx) = item
+            .title
+            .split_once('.')
+            .and_then(|(n, _)| n.trim().parse::<usize>().ok())
+            .map(|n| n.saturating_sub(1))
+        else {
+            return;
+        };
+        let Some(replacement) = synonyms.get(idx) else {
+            return;
+        };
+
+        let edit = WorkspaceEdit {
+            changes: Some(HashMap::from([(
+                uri,
+                vec![TextEdit {
+                    range,
+                    new_text: replacement.clone(),
+                }],
+            )])),
+            ..Default::default()
+        };
+        if let Err(e) = self.client.apply_edit(edit).await {
+            self.notify(
+                MessageType::ERROR,
+                &format!("helix-style: applying edit failed: {e}"),
+            )
+            .await;
+        }
+    }
+
+    /// Explain the meaning of the selected text and show a usage example in a
+    /// dismissable popup. Read-only: nothing is edited.
+    async fn run_explain(&self, uri: Url, range: Range) {
+        if range.start == range.end {
+            return;
+        }
+        let Some((llm, config)) = self.snapshot() else {
+            return;
+        };
+
+        let text = {
+            let state = self.state.lock().unwrap();
+            let Some(text) = state.documents.get(&uri) else {
+                return;
+            };
+            let (s, e) = LineIndex::new(text).byte_range(range);
+            text[s..e.min(text.len())].to_string()
+        };
+
+        if text.trim().is_empty() {
+            return;
+        }
+        if text.chars().count() > config.max_input_chars {
+            self.notify(
+                MessageType::WARNING,
+                "helix-style: selection too large to explain",
+            )
+            .await;
+            return;
+        }
+
+        self.notify(MessageType::INFO, "helix-style: explaining…")
+            .await;
+
+        let explanation = match llm
+            .explain(text.trim(), config.extra_instructions.as_deref())
+            .await
+        {
+            Ok(ex) => ex,
+            Err(e) => {
+                self.notify(MessageType::ERROR, &format!("helix-style: {e}"))
+                    .await;
+                return;
+            }
+        };
+
+        self.show_explanation(text.trim(), &explanation).await;
+    }
+
+    /// Present an explanation (meaning + example) as a dismissable popup, the same
+    /// way `show_summary` does for the check command.
+    async fn show_explanation(&self, subject: &str, explanation: &Explanation) {
+        let mut message = format!("helix-style — \"{}\"\n", one_line(subject, 80));
+        let meaning = explanation.meaning.trim();
+        if !meaning.is_empty() {
+            message.push_str(&format!("\nMeaning: {meaning}\n"));
+        }
+        let example = explanation.example.trim();
+        if !example.is_empty() {
+            message.push_str(&format!("\nExample: {example}\n"));
+        }
+        let _ = self
+            .client
+            .show_message_request(
+                MessageType::INFO,
+                message,
+                Some(vec![MessageActionItem {
+                    title: "OK".to_string(),
+                    properties: HashMap::new(),
+                }]),
+            )
+            .await;
+    }
+
     async fn notify(&self, typ: MessageType, message: &str) {
         // log_message keeps it in the LSP log; errors/warnings also pop up.
         self.client.log_message(typ, message.to_string()).await;
@@ -523,6 +725,40 @@ fn locate(text: &str, quote: &str, start: usize, end: usize) -> Option<(usize, u
         return Some((s, s + quote.len()));
     }
     text.find(quote).map(|s| (s, s + quote.len()))
+}
+
+/// A selection is "a single word" if, trimmed, it is non-empty and contains no
+/// internal whitespace (hyphens/apostrophes are allowed, e.g. `well-known`).
+fn is_single_word(s: &str) -> bool {
+    let t = s.trim();
+    !t.is_empty() && !t.chars().any(char::is_whitespace)
+}
+
+/// Extract the sentence containing the byte span `[start, end)` to give the
+/// synonym model context. Expands outward to the nearest sentence terminator
+/// (`.!?`) or blank line, then trims. Falls back to the whole text window.
+fn surrounding_sentence(text: &str, start: usize, end: usize) -> String {
+    let end = end.min(text.len());
+    let is_boundary = |c: char| matches!(c, '.' | '!' | '?' | '\n');
+
+    // Walk left from the start of the selection to the previous boundary.
+    let mut s = start;
+    for (i, c) in text[..start].char_indices().rev() {
+        if is_boundary(c) {
+            s = i + c.len_utf8();
+            break;
+        }
+        s = i;
+    }
+    // Walk right from the end of the selection to the next boundary (inclusive).
+    let mut e = end;
+    for (i, c) in text[end..].char_indices() {
+        e = end + i + c.len_utf8();
+        if is_boundary(c) {
+            break;
+        }
+    }
+    text[s..e].trim().to_string()
 }
 
 fn command_action(
@@ -591,6 +827,36 @@ mod tests {
     fn one_line_collapses_and_truncates() {
         assert_eq!(one_line("a\n  b   c", 80), "a b c");
         assert_eq!(one_line("abcdef", 3), "abc…");
+    }
+
+    #[test]
+    fn single_word_detection() {
+        assert!(is_single_word("hello"));
+        assert!(is_single_word("  well-known "));
+        assert!(is_single_word("don't"));
+        assert!(!is_single_word("two words"));
+        assert!(!is_single_word("   "));
+        assert!(!is_single_word(""));
+    }
+
+    #[test]
+    fn surrounding_sentence_extracts_clause() {
+        let text = "First sentence. The quick brown fox jumps. Last one.";
+        let word = "quick";
+        let s = text.find(word).unwrap();
+        let e = s + word.len();
+        assert_eq!(
+            surrounding_sentence(text, s, e),
+            "The quick brown fox jumps."
+        );
+    }
+
+    #[test]
+    fn surrounding_sentence_spans_whole_text_without_terminators() {
+        let text = "just a few words here";
+        let s = text.find("few").unwrap();
+        let e = s + "few".len();
+        assert_eq!(surrounding_sentence(text, s, e), "just a few words here");
     }
 
     #[test]

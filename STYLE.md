@@ -35,6 +35,13 @@ Open the code-action menu with `<space>a`:
   rewrites (configurable), then pops a **picker** that lists each full rewrite
   (numbered, wrapped so you can read the whole sentence) above the selectable
   items; choose one and it replaces the selection.
+- **Replace with synonym…** (only when you select a **single word**) — asks the
+  LLM for up to **ten** synonyms (configurable) that fit the word's meaning **in
+  the context of its sentence** and can grammatically replace it, then pops a
+  **picker**; choosing one replaces the selected word.
+- **Explain selection** (only with a selection) — asks the LLM what the selected
+  word(s) mean and pops a **read-only popup** with a plain-language **meaning**
+  and one **example** of how they are normally used. Nothing is edited.
 
 Markup is preserved: the prompt instructs the model to keep LaTeX/Typst commands,
 math, and code (`\section{…}`, `\cite{…}`, `$…$`, …) verbatim in both rewrites and
@@ -87,6 +94,7 @@ config = { model = "gpt-4o-mini", style-profile = "scientific", api-key-env = "O
 | `style-profile`      | `"scientific"`                | Review rubric: `scientific` \| `general` \| `casual`.                  |
 | `extra-instructions` | —                             | Extra system-prompt text (project glossary / house style).             |
 | `rephrase-options`   | `3`                           | How many rewrites to request for a selection (pinned exactly in `json_schema` mode). |
+| `synonym-options`    | `10`                          | Maximum number of synonyms to request for a single selected word (fewer may be returned). |
 | `json-mode`          | `"json_schema"`               | How replies are forced to JSON: `json_schema` (constrain to a schema — most reliable) \| `json_object` (looser JSON mode) \| `off` (prompt only). See note below. |
 | `severity`           | `"info"`                      | Diagnostic severity: `error` \| `warning` \| `info` \| `hint`.         |
 | `max-input-chars`    | `12000`                       | Reject (don't truncate) inputs larger than this — a cost/latency guard. |

@@ -45,6 +45,21 @@ struct AlternativesReply {
     alternatives: Vec<String>,
 }
 
+#[derive(Debug, Deserialize)]
+struct SynonymsReply {
+    #[serde(default)]
+    synonyms: Vec<String>,
+}
+
+/// A plain-language explanation of the selected text plus a usage example.
+#[derive(Debug, Clone, Deserialize)]
+pub struct Explanation {
+    #[serde(default)]
+    pub meaning: String,
+    #[serde(default)]
+    pub example: String,
+}
+
 /// A configured LLM endpoint. Cheap to clone (wraps an `Arc` inside reqwest).
 #[derive(Clone)]
 pub struct Llm {
@@ -144,6 +159,57 @@ impl Llm {
             return Err("model returned no alternatives".to_string());
         }
         Ok(alts)
+    }
+
+    /// Suggest up to `n` context-fitting synonyms for `word`, given the
+    /// `sentence` it appears in.
+    pub async fn synonyms(
+        &self,
+        word: &str,
+        sentence: &str,
+        n: usize,
+        profile: &str,
+        extra: Option<&str>,
+    ) -> Result<Vec<String>, String> {
+        let system = prompt::synonyms_system(n, profile, extra);
+        let user = prompt::synonyms_user(word, sentence);
+        let content = self
+            .complete(&system, &user, Some(("synonyms", synonyms_schema(n))))
+            .await?;
+        let obj = extract_json_object(&content)
+            .ok_or_else(|| "model did not return a JSON object".to_string())?;
+        let reply: SynonymsReply =
+            serde_json::from_str(&obj).map_err(|e| format!("parsing synonyms JSON: {e}"))?;
+        let mut seen = std::collections::HashSet::new();
+        let syns: Vec<String> = reply
+            .synonyms
+            .into_iter()
+            .map(|s| s.trim().to_string())
+            // Drop blanks, the original word, and duplicates (case-insensitive).
+            .filter(|s| !s.is_empty() && !s.eq_ignore_ascii_case(word.trim()))
+            .filter(|s| seen.insert(s.to_ascii_lowercase()))
+            .take(n)
+            .collect();
+        if syns.is_empty() {
+            return Err("model returned no synonyms".to_string());
+        }
+        Ok(syns)
+    }
+
+    /// Explain the meaning of `text` and give a typical usage example.
+    pub async fn explain(&self, text: &str, extra: Option<&str>) -> Result<Explanation, String> {
+        let system = prompt::explain_system(extra);
+        let content = self
+            .complete(&system, text, Some(("explanation", explain_schema())))
+            .await?;
+        let obj = extract_json_object(&content)
+            .ok_or_else(|| "model did not return a JSON object".to_string())?;
+        let reply: Explanation =
+            serde_json::from_str(&obj).map_err(|e| format!("parsing explanation JSON: {e}"))?;
+        if reply.meaning.trim().is_empty() && reply.example.trim().is_empty() {
+            return Err("model returned an empty explanation".to_string());
+        }
+        Ok(reply)
     }
 
     /// One chat-completions round-trip; returns the assistant message content.
@@ -257,6 +323,34 @@ fn rephrase_schema(n: usize) -> serde_json::Value {
             }
         },
         "required": ["alternatives"]
+    })
+}
+
+/// JSON schema for synonyms: up to `n` strings (fewer is allowed when the model
+/// can't find good context fits).
+fn synonyms_schema(n: usize) -> serde_json::Value {
+    json!({
+        "type": "object",
+        "properties": {
+            "synonyms": {
+                "type": "array",
+                "items": { "type": "string" },
+                "maxItems": n
+            }
+        },
+        "required": ["synonyms"]
+    })
+}
+
+/// JSON schema for the explanation: a `meaning` and a usage `example`.
+fn explain_schema() -> serde_json::Value {
+    json!({
+        "type": "object",
+        "properties": {
+            "meaning": { "type": "string" },
+            "example": { "type": "string" }
+        },
+        "required": ["meaning", "example"]
     })
 }
 

@@ -86,3 +86,62 @@ pub fn rephrase_system(n: usize, profile: &str, extra: Option<&str>) -> String {
     }
     s
 }
+
+/// System prompt for the synonym suggestion. The user message carries the word
+/// and the sentence it appears in; the model returns `{"synonyms": ["...", ...]}`
+/// with at most `n` context-appropriate replacements.
+pub fn synonyms_system(n: usize, profile: &str, extra: Option<&str>) -> String {
+    let mut s = format!(
+        "You are a precise thesaurus assistant. {rubric}\n\n\
+         The user sends a single word or short phrase together with the sentence it \
+         appears in. Suggest up to {n} synonyms or near-synonyms that fit the \
+         meaning of the word IN THAT SPECIFIC CONTEXT and could grammatically \
+         replace it in the sentence (match part of speech, number and inflection). \
+         Order them best-fit first, avoid duplicates and the original word itself, \
+         and never include explanations. Return fewer than {n} rather than padding \
+         with poor fits. Reply with ONLY a JSON object of the form \
+         {{\"synonyms\": [\"...\"]}} and nothing else.",
+        rubric = profile_rubric(profile),
+        n = n
+    );
+    s.push_str("\n\n");
+    s.push_str(MARKUP_NOTE);
+    if let Some(extra) = extra.map(str::trim).filter(|e| !e.is_empty()) {
+        s.push_str("\n\nAdditional project-specific instructions:\n");
+        s.push_str(extra);
+    }
+    s
+}
+
+/// User message for the synonym task, pairing the selected `word` with the
+/// `sentence` it occurs in so the model can judge fit in context.
+pub fn synonyms_user(word: &str, sentence: &str) -> String {
+    format!("Word: \"{word}\"\nSentence: \"{sentence}\"")
+}
+
+/// System prompt for the explain task. The model returns
+/// `{"meaning": "...", "example": "..."}` — a clear definition plus a typical
+/// usage example for the selected word(s).
+pub fn explain_system(extra: Option<&str>) -> String {
+    let mut s = String::from(
+        "You are a knowledgeable, concise language tutor. The user sends a word, \
+         phrase, or short passage. Explain what it means in plain language, and give \
+         one natural example of how it is normally used. Return a JSON object with \
+         two fields:\n\
+         - \"meaning\": a clear explanation of the meaning of the selected text (1-3 \
+         sentences). If it is a technical or domain term, say so and explain it for a \
+         general reader.\n\
+         - \"example\": one short, natural sentence that demonstrates how the \
+         word(s) are normally used. If the selection is itself a full sentence, give \
+         an example in a different context.\n\
+         Reply with ONLY a JSON object of the form \
+         {\"meaning\": \"...\", \"example\": \"...\"} and nothing else.",
+    );
+    s.push_str("\n\n");
+    s.push_str(MARKUP_NOTE);
+    if let Some(extra) = extra.map(str::trim).filter(|e| !e.is_empty()) {
+        s.push_str("\n\nAdditional project-specific instructions:\n");
+        s.push_str(extra);
+    }
+    s
+}

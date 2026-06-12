@@ -41,6 +41,8 @@ pub struct Config {
     pub max_input_chars: usize,
     /// Number of rephrasing alternatives to request for a selection.
     pub rephrase_options: usize,
+    /// Maximum number of synonyms to request for a single selected word.
+    pub synonym_options: usize,
     /// Writing-style profile that tunes the review rubric. One of `scientific`,
     /// `general`, `casual`; anything else falls back to `general`.
     pub style_profile: String,
@@ -66,6 +68,7 @@ impl Default for Config {
             max_input_chars: 12_000,
             json_mode: "json_schema".to_string(),
             rephrase_options: 3,
+            synonym_options: 10,
             style_profile: "scientific".to_string(),
             extra_instructions: None,
             severity: "info".to_string(),
