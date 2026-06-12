@@ -106,7 +106,7 @@ The feature is implemented across three layers:
 
 **`helix-view/src/document.rs`** — `Document` holds `folds: Vec<FoldSpan>`. On every `apply` the spans are position-tracked (`Assoc::After`/`Before`) and folds whose body shrinks to zero lines are dropped. `normalize_folds` keeps the list sorted by `start` and resolves overlaps (the earlier/outer fold wins).
 
-**`helix-term/src/commands.rs`** — the five fold commands (`fold_close`, `fold_open`, `fold_toggle`, `fold_all`, `unfold_all`) and their typed counterparts in `commands/typed.rs`. `fold_all` uses tree-sitter `textobjects.scm` captures (`@function`, `@class`) to find foldable ranges. Default keybindings (`za`, `zf`, `zo`, `zM`, `zR`) are in `keymap/default.rs` under the `z`/`Z` view menu.
+**`helix-term/src/commands.rs`** — the five fold commands (`fold_close`, `fold_open`, `fold_toggle`, `fold_all`, `unfold_all`) and their typed counterparts in `commands/typed.rs`. `fold_all` uses tree-sitter `textobjects.scm` captures (`@function`, `@class`) plus a direct syntax-tree walk for multi-line `string` nodes (`multiline_string_ranges`) to find foldable ranges; `fold_range_at` (the cursor-fold helper behind `fold_close`/`fold_toggle`) likewise considers function/class textobjects and any enclosing multi-line string. Default keybindings (`za`, `zf`, `zo`, `zM`, `zR`) are in `keymap/default.rs` under the `z`/`Z` view menu.
 
 Key behavioral facts (see `FOLDING.md` for the rest):
 - Folding is tree-sitter driven — it works for any language whose `textobjects.scm` defines `function`/`class` captures (Python, the REPL target language, is included).

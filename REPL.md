@@ -115,7 +115,7 @@ inspect-variables = true      # probe variable values for :jupyter-variables
 | `auto-start`        | bool            | `true`  | If no kernel is running, `:jupyter-eval` auto-starts `default-kernel`.      |
 | `inline-output`     | bool            | `true`  | Render stdout/stderr/results as virtual lines under the evaluated code.     |
 | `inline-images`     | bool            | `true`  | Render image output (e.g. plots) as graphics on terminals supporting the kitty graphics protocol; text placeholder otherwise. |
-| `max-output-lines`  | integer         | `20`    | Maximum inline lines per evaluation; extra lines are summarized.            |
+| `max-output-lines`  | integer         | `20`    | Maximum inline (wrapped) lines per evaluation; extra lines are summarized.  |
 | `inspect-variables` | bool            | `true`  | After each eval, probe the kernel for the values of variables you ran.      |
 
 > If `default-kernel` is unset and `auto-start` can't pick one, `:jupyter-eval`
@@ -210,8 +210,15 @@ virtual lines beneath the last evaluated line:
 
 - **stdout** and **results** (the value of the last expression) use the output
   style; **stderr** and **error tracebacks** use the error style.
-- Output is capped at `max-output-lines`; beyond that you'll see a
-  `… N more lines` summary.
+- Wide output is **wrapped** to the text-area width across several virtual
+  lines, so nothing is lost off-screen (there is no horizontal scroll for
+  inline output).
+- Literal `\n` escape sequences in the output (e.g. from `print`ing a
+  `repr()`'d multi-line string or a list/dict) are expanded into real line
+  breaks rather than shown verbatim.
+- Output is capped at `max-output-lines` **rendered** lines (i.e. after
+  wrapping and `\n` expansion); beyond that you'll see a `… N more lines`
+  summary.
 - Tracebacks have their ANSI color codes stripped for clean terminal rendering.
 - Re-evaluating the same line **replaces** its previous output block.
 - Output stays attached to the correct line as you edit the buffer above it.

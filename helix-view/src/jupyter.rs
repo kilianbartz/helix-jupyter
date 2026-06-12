@@ -7,6 +7,7 @@
 
 use std::collections::HashMap;
 
+use helix_core::graphemes::grapheme_width;
 use helix_core::text_annotations::LineAnnotation;
 use helix_core::Position;
 use helix_jupyter::KernelId;
@@ -275,10 +276,35 @@ pub struct RenderedLine {
     pub kind: OutputKind,
 }
 
-/// Compute the exact lines rendered for an output block, capped at `max`. Used
-/// by *both* the space-reserving [`JupyterLineAnnotation`] and the drawing
-/// decoration so they always agree on the number of virtual rows.
-pub fn rendered_lines(output: &JupyterOutput, max: usize) -> Vec<RenderedLine> {
+/// Hard-wrap `text` to at most `width` display columns, returning one string per
+/// visual row. An empty input yields a single empty row so blank output lines are
+/// preserved. Splitting is by grapheme width; a single grapheme wider than
+/// `width` is placed on its own (overlong) row rather than dropped.
+fn wrap_to_width(text: &str, width: usize) -> Vec<String> {
+    let width = width.max(1);
+    let mut rows = Vec::new();
+    let mut current = String::new();
+    let mut current_width = 0;
+    let mut buf = [0u8; 4];
+    for ch in text.chars() {
+        let cw = grapheme_width(ch.encode_utf8(&mut buf));
+        if current_width + cw > width && !current.is_empty() {
+            rows.push(std::mem::take(&mut current));
+            current_width = 0;
+        }
+        current.push(ch);
+        current_width += cw;
+    }
+    rows.push(current);
+    rows
+}
+
+/// Compute the exact lines rendered for an output block, capped at `max` visual
+/// rows and wrapped to `width` columns. Literal `\n` escape sequences in the
+/// output text are expanded into real line breaks. Used by *both* the
+/// space-reserving [`JupyterLineAnnotation`] and the drawing decoration so they
+/// always agree on the number of virtual rows.
+pub fn rendered_lines(output: &JupyterOutput, max: usize, width: usize) -> Vec<RenderedLine> {
     let mut lines = Vec::new();
     if output.lines.is_empty() {
         if output.state == ExecutionState::Running {
@@ -290,15 +316,27 @@ pub fn rendered_lines(output: &JupyterOutput, max: usize) -> Vec<RenderedLine> {
         return lines;
     }
     let max = max.max(1);
-    for line in output.lines.iter().take(max) {
-        lines.push(RenderedLine {
-            text: line.text.clone(),
-            kind: line.kind,
-        });
+    let mut more = 0;
+    'outer: for (i, line) in output.lines.iter().enumerate() {
+        // Honor literal `\n` escapes (e.g. a `repr()`'d multi-line string) as
+        // line breaks, then wrap each segment so wide output stays readable
+        // without horizontal scrolling.
+        for segment in line.text.split("\\n") {
+            for chunk in wrap_to_width(segment, width) {
+                if lines.len() >= max {
+                    more = output.lines.len() - i;
+                    break 'outer;
+                }
+                lines.push(RenderedLine {
+                    text: chunk,
+                    kind: line.kind,
+                });
+            }
+        }
     }
-    if output.lines.len() > max {
+    if more > 0 {
         lines.push(RenderedLine {
-            text: format!("… {} more lines", output.lines.len() - max),
+            text: format!("… {more} more lines"),
             kind: OutputKind::Stdout,
         });
     }
@@ -313,13 +351,13 @@ pub struct JupyterLineAnnotation {
 }
 
 impl JupyterLineAnnotation {
-    pub fn new(doc: &Document, max_output_lines: usize) -> Box<dyn LineAnnotation> {
+    pub fn new(doc: &Document, max_output_lines: usize, width: usize) -> Box<dyn LineAnnotation> {
         let text = doc.text();
         let len = text.len_chars();
         let mut rows_by_line: HashMap<usize, usize> = HashMap::new();
         for output in &doc.jupyter_outputs {
             let line = text.char_to_line(output.anchor.min(len));
-            let rows = rendered_lines(output, max_output_lines).len() + image_rows(output);
+            let rows = rendered_lines(output, max_output_lines, width).len() + image_rows(output);
             *rows_by_line.entry(line).or_insert(0) += rows;
         }
         Box::new(Self { rows_by_line })
@@ -359,6 +397,63 @@ mod tests {
     fn rejects_non_png() {
         assert_eq!(png_dimensions("bm90IGEgcG5n"), None); // "not a png"
         assert_eq!(png_dimensions(""), None);
+    }
+
+    fn output_with(lines: &[(&str, OutputKind)]) -> JupyterOutput {
+        let mut output = JupyterOutput::new(0, "id".to_string(), KernelId::default());
+        output.state = ExecutionState::Done;
+        output.lines = lines
+            .iter()
+            .map(|(text, kind)| OutputLine {
+                text: text.to_string(),
+                kind: *kind,
+            })
+            .collect();
+        output
+    }
+
+    #[test]
+    fn wraps_wide_output_to_width() {
+        let output = output_with(&[("abcdefghij", OutputKind::Stdout)]);
+        let rows: Vec<_> = rendered_lines(&output, 20, 4)
+            .into_iter()
+            .map(|l| l.text)
+            .collect();
+        assert_eq!(rows, ["abcd", "efgh", "ij"]);
+    }
+
+    #[test]
+    fn expands_literal_newline_escapes() {
+        // A single output line carrying literal backslash-n (e.g. a repr'd
+        // multi-line string) becomes several rendered rows.
+        let output = output_with(&[("a|b\\nc|d", OutputKind::Result)]);
+        let rows: Vec<_> = rendered_lines(&output, 20, 80)
+            .into_iter()
+            .map(|l| l.text)
+            .collect();
+        assert_eq!(rows, ["a|b", "c|d"]);
+    }
+
+    #[test]
+    fn caps_rendered_rows_at_max() {
+        let output = output_with(&[("one\\ntwo\\nthree\\nfour", OutputKind::Stdout)]);
+        let rows: Vec<_> = rendered_lines(&output, 2, 80)
+            .into_iter()
+            .map(|l| l.text)
+            .collect();
+        assert_eq!(rows, ["one", "two", "… 1 more lines"]);
+    }
+
+    #[test]
+    fn wrap_preserves_blank_segments() {
+        // An empty `\n`-delimited segment still occupies a row.
+        assert_eq!(wrap_to_width("", 4), [""]);
+        let output = output_with(&[("a\\n\\nb", OutputKind::Stdout)]);
+        let rows: Vec<_> = rendered_lines(&output, 20, 80)
+            .into_iter()
+            .map(|l| l.text)
+            .collect();
+        assert_eq!(rows, ["a", "", "b"]);
     }
 
     #[test]

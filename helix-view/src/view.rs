@@ -537,6 +537,7 @@ impl View {
             text_annotations.add_line_annotation(crate::jupyter::JupyterLineAnnotation::new(
                 doc,
                 jupyter.max_output_lines,
+                width as usize,
             ));
         }
 

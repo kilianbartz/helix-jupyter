@@ -1,9 +1,10 @@
 # Code folding
 
-This fork adds **code folding**: collapsing a function or class to just its
-signature line so large files are easier to navigate. A folded block is rendered
-as its signature line, underlined and followed by a `…` marker; everything below
-it (down to the end of the block) is hidden until you unfold it.
+This fork adds **code folding**: collapsing a function, class, or multi-line
+string to just its first (signature/opening) line so large files are easier to
+navigate. A folded block is rendered as its opening line, underlined and
+followed by a `…` marker; everything below it (down to the end of the block) is
+hidden until you unfold it.
 
 ```text
 def transform(rows):…          ← folded (underlined, with a trailing …)
@@ -13,16 +14,19 @@ def main():
 
 Folding is driven by tree-sitter, so it works for any language that ships a
 `textobjects.scm` with `function`/`class` captures (this includes Python, the
-language the REPL feature targets).
+language the REPL feature targets). Multi-line strings are folded too — these
+are located directly from the syntax tree (`string` nodes), so any grammar that
+names its string literals `string` (Python triple-quoted strings and docstrings
+included) gets string folding without needing a textobject capture.
 
 ## Commands
 
 | Typed command  | Static command | Description                                   |
 | -------------- | -------------- | --------------------------------------------- |
-| `:fold`        | `fold_close`   | Fold the function/class at the cursor.        |
+| `:fold`        | `fold_close`   | Fold the function/class/string at the cursor. |
 | `:unfold`      | `fold_open`    | Unfold the block at the cursor.               |
 | —              | `fold_toggle`  | Fold if open, unfold if already folded.       |
-| `:fold-all`    | `fold_all`     | Fold every function and class in the buffer.  |
+| `:fold-all`    | `fold_all`     | Fold every function, class, and string.       |
 | `:unfold-all`  | `unfold_all`   | Unfold everything.                            |
 
 `fold_all` folds the outermost blocks: a folded class hides its methods rather

@@ -5710,10 +5710,52 @@ fn reverse_selection_contents(cx: &mut Context) {
 
 // code folding
 
+/// Line spans `(start_line, end_line)` of every multi-line string literal in
+/// the syntax tree. Multi-line strings (e.g. Python triple-quoted strings and
+/// docstrings) fold onto their opening line, the same way functions and classes
+/// do. Returned spans are document-line numbers; `end_line > start_line` always.
+fn multiline_string_ranges(text: RopeSlice, syntax: &Syntax) -> Vec<(usize, usize)> {
+    let mut ranges = Vec::new();
+    let mut cursor = syntax.tree().root_node().walk();
+    // Iterative pre-order traversal that skips the inside of a string we fold.
+    let mut visited_children = false;
+    loop {
+        if !visited_children {
+            let node = cursor.node();
+            let descend = if node.kind() == "string" {
+                let byte_range = node.byte_range();
+                let start_char = text.byte_to_char(byte_range.start as usize);
+                let start_line = text.char_to_line(start_char);
+                let last = text
+                    .byte_to_char(byte_range.end as usize)
+                    .saturating_sub(1)
+                    .max(start_char);
+                let end_line = text.char_to_line(last);
+                if end_line > start_line {
+                    ranges.push((start_line, end_line));
+                }
+                // The whole string folds as one block; no need to look inside.
+                false
+            } else {
+                true
+            };
+            if descend && cursor.goto_first_child() {
+                continue;
+            }
+            visited_children = true;
+        } else if cursor.goto_next_sibling() {
+            visited_children = false;
+        } else if !cursor.goto_parent() {
+            break;
+        }
+    }
+    ranges
+}
+
 /// Returns the `(start, end)` char range to conceal in order to fold the
-/// smallest function or class enclosing `cursor`. `start` is the signature
-/// line's line ending and `end` is the start of the line the fold resumes on.
-/// Returns `None` if there is no enclosing multi-line block.
+/// smallest function, class, or multi-line string enclosing `cursor`. `start`
+/// is the signature line's line ending and `end` is the start of the line the
+/// fold resumes on. Returns `None` if there is no enclosing multi-line block.
 fn fold_range_at(
     text: RopeSlice,
     cursor: Range,
@@ -5721,6 +5763,15 @@ fn fold_range_at(
     loader: &helix_core::syntax::Loader,
 ) -> Option<(usize, usize)> {
     let mut best: Option<(usize, usize)> = None;
+    let mut consider = |start_line: usize, end_line: usize| {
+        if end_line <= start_line {
+            return;
+        }
+        if best.is_none_or(|(s, e)| (e - s) > (end_line - start_line)) {
+            best = Some((start_line, end_line));
+        }
+    };
+
     for object in ["function", "class"] {
         let range = textobject::textobject_treesitter(
             text,
@@ -5739,11 +5790,14 @@ fn fold_range_at(
         let start_line = text.char_to_line(range.from());
         let last = range.to().saturating_sub(1).max(range.from());
         let end_line = text.char_to_line(last);
-        if end_line <= start_line {
-            continue;
-        }
-        if best.is_none_or(|(s, e)| (e - s) > (end_line - start_line)) {
-            best = Some((start_line, end_line));
+        consider(start_line, end_line);
+    }
+
+    // Multi-line strings the cursor sits within are also foldable.
+    let cursor_line = cursor.cursor_line(text);
+    for (start_line, end_line) in multiline_string_ranges(text, syntax) {
+        if start_line <= cursor_line && cursor_line <= end_line {
+            consider(start_line, end_line);
         }
     }
 
@@ -5832,7 +5886,7 @@ pub(crate) fn fold_all_impl(editor: &mut Editor) {
         return;
     };
 
-    let mut ranges: Vec<(usize, usize)> = Vec::new();
+    let mut line_ranges: Vec<(usize, usize)> = Vec::new();
     for name in ["function.around", "class.around"] {
         if let Some(nodes) = query.capture_nodes(name, &root, text) {
             for node in nodes {
@@ -5844,19 +5898,26 @@ pub(crate) fn fold_all_impl(editor: &mut Editor) {
                     .saturating_sub(1)
                     .max(start_char);
                 let end_line = text.char_to_line(last);
-                if end_line <= start_line {
-                    continue;
+                if end_line > start_line {
+                    line_ranges.push((start_line, end_line));
                 }
-                let start = line_end_char_index(&text, start_line);
-                let end = if end_line + 1 >= text.len_lines() {
-                    text.len_chars()
-                } else {
-                    text.line_to_char(end_line + 1)
-                };
-                ranges.push((start, end));
             }
         }
     }
+    line_ranges.extend(multiline_string_ranges(text, syntax));
+
+    let mut ranges: Vec<(usize, usize)> = line_ranges
+        .into_iter()
+        .map(|(start_line, end_line)| {
+            let start = line_end_char_index(&text, start_line);
+            let end = if end_line + 1 >= text.len_lines() {
+                text.len_chars()
+            } else {
+                text.line_to_char(end_line + 1)
+            };
+            (start, end)
+        })
+        .collect();
 
     // Add outermost blocks first; `add_fold` skips folds nested inside an
     // already-folded region.

@@ -85,7 +85,7 @@ impl Decoration for JupyterOutputs<'_> {
         let width = renderer.viewport.width as usize;
 
         for output in outputs {
-            for line in rendered_lines(output, self.max_lines) {
+            for line in rendered_lines(output, self.max_lines, width) {
                 let style = self.styles.style(line.kind);
                 renderer.set_string_truncated(x, row, &line.text, width, |_| style, true, false);
                 row += 1;
