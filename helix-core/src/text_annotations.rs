@@ -374,9 +374,12 @@ impl<'a> TextAnnotations<'a> {
 
     /// Add a layer of folded regions.
     ///
-    /// The folds **must be sorted** by their `start` and **must not overlap**.
-    /// The chars in each fold's `start..end` range are concealed and replaced
-    /// with a single marker grapheme during rendering.
+    /// The folds **must be sorted** by their `start` (with an enclosing fold
+    /// before the folds nested inside it). Folds may be **nested** — one fold
+    /// fully contained in another — but must not *partially* overlap. The chars
+    /// in each fold's `start..end` range are concealed and replaced with a
+    /// single marker grapheme during rendering; a nested fold inside an emitted
+    /// fold is simply skipped (its body was already concealed).
     pub fn add_folds(&mut self, layer: &'a [FoldSpan]) -> &mut Self {
         if !layer.is_empty() {
             self.folds.push((layer, ()).into());
@@ -431,9 +434,22 @@ impl<'a> TextAnnotations<'a> {
 
     /// Returns the fold that starts exactly at `char_idx`, if any.
     pub(crate) fn fold_at(&self, char_idx: usize) -> Option<FoldSpan> {
-        self.folds
-            .iter()
-            .find_map(|layer| layer.consume(char_idx, |fold| fold.start).copied())
+        self.folds.iter().find_map(|layer| {
+            // Skip folds whose `start` now lies behind `char_idx`. These are
+            // nested inside an enclosing fold that was already emitted: emitting
+            // it consumed its concealed chars in one step, jumping the cursor
+            // past them. Advancing the layer cursor keeps it valid so later
+            // sibling folds are still emitted.
+            loop {
+                let fold = layer.annotations.get(layer.current_index.get())?;
+                if fold.start < char_idx {
+                    layer.current_index.set(layer.current_index.get() + 1);
+                } else {
+                    break;
+                }
+            }
+            layer.consume(char_idx, |fold| fold.start).copied()
+        })
     }
 
     pub(crate) fn process_virtual_text_anchors(&self, grapheme: &FormattedGrapheme) {

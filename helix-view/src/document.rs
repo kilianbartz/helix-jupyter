@@ -2348,29 +2348,52 @@ impl Document {
         &self.cell_spans
     }
 
-    /// Keeps `folds` sorted by `start` and drops folds that overlap an earlier
-    /// one (the earlier, outer fold wins).
+    /// Keeps `folds` ordered (outer folds first) and drops folds that *partially*
+    /// overlap an already-kept one. Properly nested folds — where one fold fully
+    /// contains another, e.g. a LaTeX section enclosing its subsections — are
+    /// retained; only genuine conflicts (partial overlaps and exact duplicates)
+    /// are dropped, with the earlier/outer fold winning.
     fn normalize_folds(&mut self) {
-        self.folds.sort_by_key(|fold| fold.start);
-        let mut last_end = 0;
-        self.folds.retain(|fold| {
-            if fold.start >= last_end && fold.start < fold.end {
-                last_end = fold.end;
-                true
-            } else {
-                false
+        // Sort by `start` ascending, then by `end` descending so that an
+        // enclosing fold is always visited before the folds nested within it.
+        self.folds
+            .sort_by(|a, b| a.start.cmp(&b.start).then(b.end.cmp(&a.end)));
+        let mut kept: Vec<FoldSpan> = Vec::with_capacity(self.folds.len());
+        'outer: for fold in std::mem::take(&mut self.folds) {
+            if fold.start >= fold.end {
+                continue;
             }
-        });
+            for k in &kept {
+                let disjoint = fold.end <= k.start || k.end <= fold.start;
+                // `k` was kept first, so `k.start <= fold.start`; nesting here
+                // means `k` fully contains `fold`.
+                let nested = k.start <= fold.start && fold.end <= k.end;
+                let identical = fold.start == k.start && fold.end == k.end;
+                if identical || (!disjoint && !nested) {
+                    continue 'outer;
+                }
+            }
+            kept.push(fold);
+        }
+        self.folds = kept;
     }
 
-    /// Folds the char range `start..end`. Returns whether a fold was added (it is
-    /// ignored if it is empty or overlaps an existing fold).
+    /// Folds the char range `start..end`. Returns whether a fold was added. The
+    /// fold is ignored if it is empty, identical to an existing fold, or
+    /// *partially* overlaps one; a fold that fully contains (or is fully
+    /// contained by) an existing fold is allowed, so sections can be folded over
+    /// already-folded subsections.
     pub fn add_fold(&mut self, start: usize, end: usize) -> bool {
         if start >= end {
             return false;
         }
-        if self.folds.iter().any(|f| start < f.end && f.start < end) {
-            return false;
+        for f in &self.folds {
+            let disjoint = end <= f.start || f.end <= start;
+            let nested = (start <= f.start && f.end <= end) || (f.start <= start && end <= f.end);
+            let identical = start == f.start && end == f.end;
+            if identical || (!disjoint && !nested) {
+                return false;
+            }
         }
         let end_line = self.text.char_to_line(end);
         self.folds.push(FoldSpan {

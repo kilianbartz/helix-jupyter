@@ -78,6 +78,10 @@ diamond if neither is themed:
   visible and every following line of the block is concealed.
 - Folds follow edits — inserting or deleting text above or inside a fold keeps it
   anchored, and a fold is dropped automatically if its body is deleted.
+- Folds may be nested: a fold whose range fully contains (or is fully contained
+  by) an existing fold is allowed, so a LaTeX section can be folded even when its
+  subsections are already folded. Unfolding the outer block reveals the inner
+  folds still collapsed. Only *partially* overlapping folds are rejected.
 - Vertical cursor movement, scrolling, and the line-number gutter all skip folded
   lines. Horizontal movement (`h`/`l`) and `goto`/search into a concealed line do
   not auto-unfold; use `:unfold` / `zo` to reveal it.

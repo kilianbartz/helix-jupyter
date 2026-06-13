@@ -186,6 +186,30 @@ fn fold() {
     assert_eq!(fold_text(text, &folds), "fn a() {…\nafter \n ");
 }
 
+#[test]
+fn nested_folds() {
+    // An outer block enclosing an inner one (e.g. a section folded over an
+    // already-folded subsection). The outer fold conceals the inner fold's
+    // body, so only the outer marker is emitted; the inner fold must not leave
+    // the layer cursor stuck so the trailing line still renders.
+    let text = "outer\n  inner\n  body\n  end\nafter\n";
+    // "outer" ends at char 5; the outer fold conceals through char 27 (start of
+    // "after"). The inner fold (8..26) is nested entirely within it.
+    let folds = [
+        FoldSpan {
+            start: 5,
+            end: 27,
+            end_line: 4,
+        },
+        FoldSpan {
+            start: 8,
+            end: 26,
+            end_line: 4,
+        },
+    ];
+    assert_eq!(fold_text(text, &folds), "outer…\nafter \n ");
+}
+
 fn annotate_text(text: &str, softwrap: bool, annotations: &[InlineAnnotation]) -> String {
     DocumentFormatter::new_at_prev_checkpoint(
         text.into(),

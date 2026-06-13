@@ -110,7 +110,7 @@ The feature is implemented across three layers:
 
 Key behavioral facts (see `FOLDING.md` for the rest):
 - Folding is tree-sitter driven — it works for any language whose `textobjects.scm` defines `function`/`class` captures (Python, the REPL target language, is included).
-- Folds are stored per-document as a sorted, non-overlapping `Vec<FoldSpan>` and are not persisted across editor sessions.
+- Folds are stored per-document as a sorted `Vec<FoldSpan>` (`normalize_folds` keeps outer folds first and drops only *partial* overlaps; properly nested folds — e.g. a LaTeX section over already-folded subsections — are allowed). The renderer's `fold_at` skips folds already concealed by an enclosing fold. Folds are persisted across sessions in `.helix/folds.toml`.
 - The signature line (first line of the block) stays visible; all subsequent lines of the block are concealed and replaced with a `…` marker.
 - Theme scope: `ui.virtual.fold` (controls the `…` marker color and underline).
 
